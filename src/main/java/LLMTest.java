@@ -31,7 +31,7 @@ public class LLMTest {
         // system 消息：定义模型的行为规则
         JsonObject systemMsg = new JsonObject();
         systemMsg.addProperty("role", "system");
-        systemMsg.addProperty("content", "你是一个专业的电商客服助手，回答要简洁明了。");
+        systemMsg.addProperty("content", "你是一个电商客服，需要给出用户推荐的同时给出合理询问");
         messages.add(systemMsg);
 
         // user 消息：用户的问题
