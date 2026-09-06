@@ -41,3 +41,17 @@ mvn compile exec:java "-Dexec.mainClass=DocumentExtractor" "-Dexec.args=资料�
 ```
 
 当前内嵌解析方式只应用于本地可信文档；开放用户上传后应改用隔离的 Tika 服务。
+
+### 一条命令完成提取和自动清洗
+
+```powershell
+.\scripts\extract_and_clean.ps1 -InputFile .\data\documents\source-003.pdf -SourceId source-003
+```
+
+命令会分别生成：
+
+- `data/extracted/source-003.txt`：Tika 原始提取结果，不做覆盖或修改。
+- `data/cleaned/source-003.txt`：合并断行、清除重复页眉页脚和独立页码后的文本。
+- `data/cleaned/source-003.report.json`：清洗统计报告。
+
+自动清洗后仍应抽查复杂双栏、表格和扫描 PDF 的内容，再将 `cleaned` 文件交给递归切割脚本。
