@@ -14,24 +14,25 @@ public final class StrategySearcher {
 
         String query = String.join(" ", Arrays.asList(args)).trim();
         try {
-            EmbeddingClient embedding = new EmbeddingClient(System.getenv("SILICONFLOW_API_KEY"));
-            QdrantClient qdrant = new QdrantClient(StrategyIndexer.qdrantUrl());
-            qdrant.ensureCollection(EmbeddingClient.DIMENSION);
-            List<Float> queryVector = embedding.embedQuery(query);
-            JsonArray points = qdrant.search(queryVector, 5);
+            try (EmbeddingClient embedding = new EmbeddingClient(System.getenv("SILICONFLOW_API_KEY"));
+                 QdrantClient qdrant = new QdrantClient(StrategyIndexer.qdrantUrl())) {
+                qdrant.ensureCollection(EmbeddingClient.DIMENSION);
+                List<Float> queryVector = embedding.embedQuery(query);
+                JsonArray points = qdrant.search(queryVector, 5);
 
-            System.out.println("问题：" + query);
-            System.out.println("最相关的 chunk：");
-            for (int i = 0; i < points.size(); i++) {
-                JsonObject point = points.get(i).getAsJsonObject();
-                JsonObject payload = point.getAsJsonObject("payload");
-                System.out.printf("%n%d. 相似度 %.4f | %s | %s%n%s%n来源：%s%n",
-                        i + 1,
-                        point.get("score").getAsDouble(),
-                        payload.get("strategyName").getAsString(),
-                        payload.get("chunkType").getAsString(),
-                        payload.get("text").getAsString(),
-                        payload.get("sourceIds"));
+                System.out.println("问题：" + query);
+                System.out.println("最相关的 chunk：");
+                for (int i = 0; i < points.size(); i++) {
+                    JsonObject point = points.get(i).getAsJsonObject();
+                    JsonObject payload = point.getAsJsonObject("payload");
+                    System.out.printf("%n%d. 相似度 %.4f | %s | %s%n%s%n来源：%s%n",
+                            i + 1,
+                            point.get("score").getAsDouble(),
+                            payload.get("strategyName").getAsString(),
+                            payload.get("chunkType").getAsString(),
+                            payload.get("text").getAsString(),
+                            payload.get("sourceIds"));
+                }
             }
         } catch (Exception error) {
             System.err.println("搜索失败：" + error.getMessage());
