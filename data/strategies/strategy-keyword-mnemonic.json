@@ -1,0 +1,59 @@
+{
+  "strategyId": "strategy-keyword-mnemonic",
+  "name": "关键词助记",
+  "aliases": [
+    "关键词法",
+    "keyword mnemonic"
+  ],
+  "summary": "将需要记忆的新词汇与一个熟悉的关键词联想，通过形成心理意象来辅助记忆词汇含义。",
+  "steps": [
+    "选择与目标词汇发音相近的熟悉关键词",
+    "建立关键词与目标词汇之间的语音联想",
+    "在脑海中形成关键词与词汇含义互动的心理图像",
+    "通过回忆心理图像来提取词汇含义"
+  ],
+  "suitableFor": [
+    {
+      "label": "外语词汇记忆",
+      "reason": "关键词助记在外语词汇学习中表现出即时和延时的记忆优势。",
+      "sourceIds": [
+        "source-006"
+      ]
+    },
+    {
+      "label": "需要记忆配对信息（如术语定义）",
+      "reason": "对于简单的配对学习任务，关键词法能有效促进记忆保持。",
+      "sourceIds": [
+        "source-006"
+      ]
+    }
+  ],
+  "notSuitableFor": [
+    {
+      "label": "需要理解性学习的复杂材料",
+      "reason": "关键词法仅促进表面记忆，无法促进对材料深层含义的理解。",
+      "sourceIds": [
+        "source-006"
+      ]
+    },
+    {
+      "label": "需要学习者自行生成关键词的材料",
+      "reason": "当学习者需要自己生成关键词时，效果可能消失甚至不如直接学习。",
+      "sourceIds": [
+        "source-006"
+      ]
+    }
+  ],
+  "sourceIds": [
+    "source-006"
+  ],
+  "recommendation": {
+    "evidenceScore": 0.3,
+    "communityScore": 0.5,
+    "effectivenessScore": 0.3,
+    "overallScore": 0.37,
+    "triedCount": 0,
+    "helpfulCount": 0
+  },
+  "reviewStatus": "draft"
+}
