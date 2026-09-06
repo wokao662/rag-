@@ -1,0 +1,61 @@
+{
+  "strategyId": "strategy-distributed-practice",
+  "name": "间隔练习",
+  "aliases": [
+    "分散练习",
+    "distributed practice"
+  ],
+  "summary": "将学习分散到多个较短的时段中，以固定间隔反复回顾学习内容，而非一次性长时间突击学习，从而提升长期记忆效果。",
+  "steps": [
+    "查看课程大纲，确认考试日期和需要覆盖的主题",
+    "制定间隔学习计划，将备考分散到数周内",
+    "每隔固定间隔（如每隔一天或每周固定几天）安排一次较短的学习时段（约1-2小时）",
+    "每个时段集中攻克一部分材料，深入加工和整合概念",
+    "在后续时段中回顾之前学过的旧材料（建议75%时间用于新材料，25%时间用于旧材料）",
+    "坚持执行计划，避免跳过学习时段"
+  ],
+  "suitableFor": [
+    {
+      "label": "有明确考试日期的课程学习",
+      "reason": "可以根据课程大纲提前数周规划间隔学习计划，将备考分散到考试前的多个时段中。",
+      "sourceIds": [
+        "source-006"
+      ]
+    },
+    {
+      "label": "需要长期记忆大量课程内容",
+      "reason": "间隔练习通过多次重温材料，将信息更有效地编码到长期记忆中，减少遗忘。",
+      "sourceIds": [
+        "source-006"
+      ]
+    }
+  ],
+  "notSuitableFor": [
+    {
+      "label": "考试前仅剩1-2天",
+      "reason": "间隔练习需要提前数周规划，临时无法实施有效的间隔安排。",
+      "sourceIds": [
+        "source-006"
+      ]
+    },
+    {
+      "label": "缺乏自律和学习计划能力",
+      "reason": "间隔练习要求长期坚持固定时段学习，需要较强的纪律性来避免分心和跳过学习时段。",
+      "sourceIds": [
+        "source-006"
+      ]
+    }
+  ],
+  "sourceIds": [
+    "source-006"
+  ],
+  "recommendation": {
+    "evidenceScore": 0.9,
+    "communityScore": 0.5,
+    "effectivenessScore": 0.8,
+    "overallScore": 0.73,
+    "triedCount": 0,
+    "helpfulCount": 0
+  },
+  "reviewStatus": "draft"
+}
