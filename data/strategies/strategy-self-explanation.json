@@ -1,0 +1,60 @@
+{
+  "strategyId": "strategy-self-explanation",
+  "name": "自我解释",
+  "aliases": [
+    "自我说明",
+    "self-explanation"
+  ],
+  "summary": "用自己的话解释学习材料中的概念、步骤和过程，将新信息与已有知识建立联系，从而促进深度理解和迁移能力。",
+  "steps": [
+    "阅读学习材料中的概念或解题步骤",
+    "用自己的话解释每个概念的含义",
+    "解释不同概念之间如何关联",
+    "对于解题过程，解释每一步为什么要这样做",
+    "对照资料检查解释的准确性并修正"
+  ],
+  "suitableFor": [
+    {
+      "label": "需要理解复杂概念和过程的学习",
+      "reason": "自我解释能促使学习者将新信息与已有知识建立联系，显著促进近迁移和远迁移表现。",
+      "sourceIds": [
+        "source-006"
+      ]
+    },
+    {
+      "label": "数学、科学等问题解决型学科",
+      "reason": "在解题过程中进行自我解释，能有效提升问题解决能力和知识迁移能力。",
+      "sourceIds": [
+        "source-006"
+      ]
+    }
+  ],
+  "notSuitableFor": [
+    {
+      "label": "认知负荷已较高的学习者",
+      "reason": "自我解释需要额外的认知资源，对于认知负荷已接近饱和的学习者可能适得其反。",
+      "sourceIds": [
+        "source-006"
+      ]
+    },
+    {
+      "label": "时间紧迫的短期备考",
+      "reason": "自我解释会显著增加学习时间（30%-100%），在时间受限的情况下可能不划算。",
+      "sourceIds": [
+        "source-006"
+      ]
+    }
+  ],
+  "sourceIds": [
+    "source-006"
+  ],
+  "recommendation": {
+    "evidenceScore": 0.7,
+    "communityScore": 0.5,
+    "effectivenessScore": 0.5,
+    "overallScore": 0.57,
+    "triedCount": 0,
+    "helpfulCount": 0
+  },
+  "reviewStatus": "draft"
+}
