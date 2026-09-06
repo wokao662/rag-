@@ -1,0 +1,18 @@
+{
+  "sourceId": "source-002",
+  "sourceType": "research_paper",
+  "title": "资料标题",
+  "authors": ["S. C. Pan for UCSD Psychology"],
+  "publisher": "S. C. Pan for UCSD Psychology",
+  "publishedYear": 2024,
+  "url": "https://psychology.ucsd.edu/undergraduate-program//undergraduate-resources/academic-writing-resources/effective-studying/spaced-practice.html",
+  "contributor": {
+    "type": "system",
+    "userId": null
+  },
+  "verification": {
+    "status": "verified",
+    "reviewerId": null,
+    "reviewedAt": "2026-09-05T00:00:00+08:00"
+  }
+}
