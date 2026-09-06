@@ -1,0 +1,33 @@
+{
+    "strategyId": "strategy-learning-strategy-classification",
+    "name": "学习策略分类",
+    "aliases": [
+        "认知策略",
+        "元认知策略",
+        "资源管理策略"
+    ],
+    "summary": "该研究将中学生学习策略划分为认知策略、元认知策略和资源管理策略三个结构维度。",
+    "steps": [],
+    "suitableFor": [
+        {
+            "label": "中学生学习策略分析",
+            "reason": "该研究以初中一年级至高中三年级学生为研究对象。",
+            "sourceIds": [
+                "source-003"
+            ]
+        }
+    ],
+    "notSuitableFor": [],
+    "sourceIds": [
+        "source-003"
+    ],
+    "recommendation": {
+        "evidenceScore": 0,
+        "communityScore": 0,
+        "effectivenessScore": 0,
+        "overallScore": 0,
+        "triedCount": 0,
+        "helpfulCount": 0
+    },
+    "reviewStatus": "draft"
+}
