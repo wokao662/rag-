@@ -11,6 +11,8 @@
     <properties>
         <maven.compiler.release>17</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <tika.version>4.0.0</tika.version>
+        <exec.mainClass>LLMTest</exec.mainClass>
     </properties>
 
     <dependencies>
@@ -24,6 +26,17 @@
             <artifactId>gson</artifactId>
             <version>2.13.1</version>
         </dependency>
+        <dependency>
+            <groupId>org.apache.tika</groupId>
+            <artifactId>tika-core</artifactId>
+            <version>${tika.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.tika</groupId>
+            <artifactId>tika-parsers-standard-package</artifactId>
+            <version>${tika.version}</version>
+            <type>pom</type>
+        </dependency>
     </dependencies>
 
     <build>
@@ -33,7 +46,7 @@
                 <artifactId>exec-maven-plugin</artifactId>
                 <version>3.5.1</version>
                 <configuration>
-                    <mainClass>LLMTest</mainClass>
+                    <mainClass>${exec.mainClass}</mainClass>
                 </configuration>
             </plugin>
         </plugins>
