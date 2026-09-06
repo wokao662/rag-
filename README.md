@@ -69,3 +69,37 @@ python .\generate_strategy_chunks.py
 ```powershell
 python .\generate_strategy_chunks.py --strict
 ```
+
+## 向量化、入库与搜索
+
+当前配置为硅基流动 `Qwen/Qwen3-Embedding-4B`、1024 维稠密向量，以及 Qdrant `Cosine` 相似度。
+搜索时会为用户问题添加检索任务指令，知识库 chunk 保持原文向量化。
+
+先启动 Qdrant，并在当前 VS Code PowerShell 会话中设置硅基流动 API Key：
+
+```powershell
+docker start qdrant
+$env:SILICONFLOW_API_KEY="你的硅基流动 API Key"
+```
+
+生成最终 chunk 后执行入库：
+
+```powershell
+python .\generate_strategy_chunks.py --strict
+mvn compile exec:java "-Dexec.mainClass=StrategyIndexer"
+```
+
+程序会创建 `learning_strategies` Collection，并把 `data/chunks/*.jsonl` 全部写入。
+`chunkId` 是稳定 UUID，因此重复运行会更新已有数据，不会生成重复记录。
+
+执行一次检索：
+
+```powershell
+mvn compile exec:java "-Dexec.mainClass=StrategySearcher" "-Dexec.args=我总是考试前突击，学完很快忘记，应该怎么办"
+```
+
+Qdrant 默认地址是 `http://127.0.0.1:6333`。如果以后连接其他 Qdrant，可设置：
+
+```powershell
+$env:QDRANT_URL="http://服务器地址:6333"
+```
