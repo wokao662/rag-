@@ -14,7 +14,7 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /** 调用硅基流动 Qwen3 Embedding API。 */
-public final class EmbeddingClient {
+public final class EmbeddingClient implements AutoCloseable {
     public static final String MODEL = "Qwen/Qwen3-Embedding-4B";
     public static final int DIMENSION = 1024;
     public static final int MAX_BATCH_SIZE = 10;
@@ -95,6 +95,19 @@ public final class EmbeddingClient {
                 throw new IOException("Embedding 返回数量与输入数量不一致");
             }
             return ordered;
+        }
+    }
+
+    @Override
+    public void close() {
+        httpClient.dispatcher().executorService().shutdown();
+        httpClient.connectionPool().evictAll();
+        if (httpClient.cache() != null) {
+            try {
+                httpClient.cache().close();
+            } catch (IOException ignored) {
+                // 无需因关闭可选缓存失败而影响程序退出。
+            }
         }
     }
 }
