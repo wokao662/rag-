@@ -1,0 +1,52 @@
+{
+  "strategyId": "strategy-rereading",
+  "name": "重复阅读",
+  "aliases": [
+    "再读",
+    "rereading"
+  ],
+  "summary": "多次重复阅读同一学习材料，通过反复接触来加深印象和记忆。",
+  "steps": [
+    "第一次阅读学习材料",
+    "再次阅读同一材料",
+    "根据需要继续重复阅读",
+    "回顾材料内容"
+  ],
+  "suitableFor": [
+    {
+      "label": "初次接触新材料的快速浏览",
+      "reason": "第二次阅读通常比第一次带来最多的额外收益。",
+      "sourceIds": [
+        "source-006"
+      ]
+    }
+  ],
+  "notSuitableFor": [
+    {
+      "label": "需要长期记忆保持的任务",
+      "reason": "重复阅读在延时测试中效果极差，间隔练习的效果远优于重复阅读。",
+      "sourceIds": [
+        "source-006"
+      ]
+    },
+    {
+      "label": "需要深度理解和分析的任务",
+      "reason": "重复阅读不促进深度加工，84%的大学生自报使用此方法，但效果最差。",
+      "sourceIds": [
+        "source-006"
+      ]
+    }
+  ],
+  "sourceIds": [
+    "source-006"
+  ],
+  "recommendation": {
+    "evidenceScore": 0.2,
+    "communityScore": 0.9,
+    "effectivenessScore": 0.2,
+    "overallScore": 0.38,
+    "triedCount": 0,
+    "helpfulCount": 0
+  },
+  "reviewStatus": "draft"
+}
