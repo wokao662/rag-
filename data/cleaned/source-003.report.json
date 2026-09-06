@@ -1,0 +1,9 @@
+{
+  "originalCharacters": 24754,
+  "cleanedCharacters": 22979,
+  "originalLines": 1532,
+  "outputParagraphs": 163,
+  "removedBlankLines": 658,
+  "removedPageNumberLines": 34,
+  "removedRepeatedHeaderFooterLines": 57
+}
