@@ -1,2 +1,6 @@
-LLMTest.class
 DocumentExtractor.class
+StrategySearcher.class
+LLMTest.class
+QdrantClient.class
+StrategyIndexer.class
+EmbeddingClient.class
