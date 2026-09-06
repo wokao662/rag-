@@ -22,26 +22,27 @@ public final class StrategyIndexer {
                 throw new IllegalStateException("data/chunks 中没有可入库的 .jsonl chunk");
             }
 
-            EmbeddingClient embedding = new EmbeddingClient(System.getenv("SILICONFLOW_API_KEY"));
-            QdrantClient qdrant = new QdrantClient(qdrantUrl());
-            qdrant.ensureCollection(EmbeddingClient.DIMENSION);
+            try (EmbeddingClient embedding = new EmbeddingClient(System.getenv("SILICONFLOW_API_KEY"));
+                 QdrantClient qdrant = new QdrantClient(qdrantUrl())) {
+                qdrant.ensureCollection(EmbeddingClient.DIMENSION);
 
-            int indexed = 0;
-            for (int start = 0; start < chunks.size(); start += EmbeddingClient.MAX_BATCH_SIZE) {
-                List<JsonObject> batch = chunks.subList(start,
-                        Math.min(start + EmbeddingClient.MAX_BATCH_SIZE, chunks.size()));
-                List<String> texts = batch.stream().map(chunk -> chunk.get("text").getAsString()).toList();
-                List<List<Float>> vectors = embedding.embedDocuments(texts);
+                int indexed = 0;
+                for (int start = 0; start < chunks.size(); start += EmbeddingClient.MAX_BATCH_SIZE) {
+                    List<JsonObject> batch = chunks.subList(start,
+                            Math.min(start + EmbeddingClient.MAX_BATCH_SIZE, chunks.size()));
+                    List<String> texts = batch.stream().map(chunk -> chunk.get("text").getAsString()).toList();
+                    List<List<Float>> vectors = embedding.embedDocuments(texts);
 
-                List<JsonObject> points = new ArrayList<>();
-                for (int i = 0; i < batch.size(); i++) {
-                    points.add(toPoint(batch.get(i), vectors.get(i)));
+                    List<JsonObject> points = new ArrayList<>();
+                    for (int i = 0; i < batch.size(); i++) {
+                        points.add(toPoint(batch.get(i), vectors.get(i)));
+                    }
+                    qdrant.upsert(points);
+                    indexed += batch.size();
+                    System.out.printf("入库进度：%d/%d%n", indexed, chunks.size());
                 }
-                qdrant.upsert(points);
-                indexed += batch.size();
-                System.out.printf("入库进度：%d/%d%n", indexed, chunks.size());
+                System.out.println("入库完成，共写入 " + indexed + " 个 chunk。重复运行会按 chunkId 更新，不会产生重复点。");
             }
-            System.out.println("入库完成，共写入 " + indexed + " 个 chunk。重复运行会按 chunkId 更新，不会产生重复点。");
         } catch (Exception error) {
             System.err.println("入库失败：" + error.getMessage());
             System.exit(1);
