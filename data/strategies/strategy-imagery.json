@@ -1,0 +1,59 @@
+{
+  "strategyId": "strategy-imagery",
+  "name": "心理意象",
+  "aliases": [
+    "心理想象",
+    "imagery for text"
+  ],
+  "summary": "在阅读学习材料时，在脑海中形成与内容相关的视觉图像，通过视觉编码来辅助记忆。",
+  "steps": [
+    "阅读描述性的学习材料",
+    "在脑海中形成与文字内容对应的视觉图像",
+    "想象图像中各元素之间的关系和互动",
+    "通过回忆心理图像来提取信息"
+  ],
+  "suitableFor": [
+    {
+      "label": "描述性文本和具体对象的学习",
+      "reason": "当材料描述具体的物体、场景或过程时，心理意象能有效辅助记忆。",
+      "sourceIds": [
+        "source-006"
+      ]
+    },
+    {
+      "label": "听觉通道接收信息时",
+      "reason": "当学习者通过听而非读的方式接收信息时，心理意象的效果可能更明显。",
+      "sourceIds": [
+        "source-006"
+      ]
+    }
+  ],
+  "notSuitableFor": [
+    {
+      "label": "抽象概念的学习",
+      "reason": "抽象概念难以形成具体的视觉图像，心理意象的效果有限。",
+      "sourceIds": [
+        "source-006"
+      ]
+    },
+    {
+      "label": "需要详细理解文本含义的任务",
+      "reason": "标准化测试（如大都会成就测验）中，心理意象训练未显示出对理解力的提升效果。",
+      "sourceIds": [
+        "source-006"
+      ]
+    }
+  ],
+  "sourceIds": [
+    "source-006"
+  ],
+  "recommendation": {
+    "evidenceScore": 0.3,
+    "communityScore": 0.5,
+    "effectivenessScore": 0.3,
+    "overallScore": 0.37,
+    "triedCount": 0,
+    "helpfulCount": 0
+  },
+  "reviewStatus": "draft"
+}
