@@ -13,7 +13,7 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /** 通过 Qdrant REST API 创建集合、写入和检索向量。 */
-public final class QdrantClient {
+public final class QdrantClient implements AutoCloseable {
     public static final String COLLECTION = "learning_strategies";
     private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
 
@@ -93,6 +93,19 @@ public final class QdrantClient {
                 throw new IOException("Qdrant 请求失败 (HTTP " + response.code() + "): " + responseBody);
             }
             return gson.fromJson(responseBody, JsonObject.class);
+        }
+    }
+
+    @Override
+    public void close() {
+        httpClient.dispatcher().executorService().shutdown();
+        httpClient.connectionPool().evictAll();
+        if (httpClient.cache() != null) {
+            try {
+                httpClient.cache().close();
+            } catch (IOException ignored) {
+                // 无需因关闭可选缓存失败而影响程序退出。
+            }
         }
     }
 }
