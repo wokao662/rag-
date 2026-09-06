@@ -1,0 +1,57 @@
+{
+  "generatedStrategies": 10,
+  "generatedChunks": 92,
+  "generated": [
+    {
+      "file": "strategy-distributed-practice.json",
+      "output": "strategy-distributed-practice.jsonl",
+      "chunks": 11
+    },
+    {
+      "file": "strategy-elaborative-interrogation.json",
+      "output": "strategy-elaborative-interrogation.jsonl",
+      "chunks": 10
+    },
+    {
+      "file": "strategy-highlighting.json",
+      "output": "strategy-highlighting.jsonl",
+      "chunks": 7
+    },
+    {
+      "file": "strategy-imagery.json",
+      "output": "strategy-imagery.jsonl",
+      "chunks": 9
+    },
+    {
+      "file": "strategy-interleaved-practice.json",
+      "output": "strategy-interleaved-practice.jsonl",
+      "chunks": 10
+    },
+    {
+      "file": "strategy-keyword-mnemonic.json",
+      "output": "strategy-keyword-mnemonic.jsonl",
+      "chunks": 9
+    },
+    {
+      "file": "strategy-practice-testing.json",
+      "output": "strategy-practice-testing.jsonl",
+      "chunks": 9
+    },
+    {
+      "file": "strategy-rereading.json",
+      "output": "strategy-rereading.jsonl",
+      "chunks": 8
+    },
+    {
+      "file": "strategy-self-explanation.json",
+      "output": "strategy-self-explanation.jsonl",
+      "chunks": 10
+    },
+    {
+      "file": "strategy-summarization.json",
+      "output": "strategy-summarization.jsonl",
+      "chunks": 9
+    }
+  ],
+  "errors": []
+}
