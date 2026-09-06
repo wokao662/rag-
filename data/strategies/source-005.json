@@ -1,0 +1,118 @@
+{
+    "strategyId": "strategy-spaced-learning",
+    "name": "间隔学习",
+    "aliases": [
+        "间隔重复",
+        "分散学习",
+        "间隔效应",
+        "Spaced Learning",
+        "Spaced Practice",
+        "Spacing Effect"
+    ],
+    "summary": "在多次学习同一内容之间设置一定时间间隔，而不是在短时间内连续集中重复，以促进知识的长期记忆和保持。",
+    "steps": [
+        "确定需要长期记忆的学习内容",
+        "进行第一次学习",
+        "在两次学习之间设置时间间隔",
+        "经过间隔后再次学习或练习相同内容",
+        "根据学习周期继续安排后续重复",
+        "在较长时间后进行测试或回忆，以检查长期保持效果"
+    ],
+    "suitableFor": [
+        {
+            "label": "需要长期记忆的学习任务",
+            "reason": "研究综述表明，间隔学习对长期记忆保持具有较好的促进作用。",
+            "sourceIds": [
+                "source-005"
+            ]
+        },
+        {
+            "label": "需要多次重复学习的内容",
+            "reason": "间隔学习的核心是在多次重复呈现同一学习项目之间设置时间间隔。",
+            "sourceIds": [
+                "source-005"
+            ]
+        },
+        {
+            "label": "考试复习",
+            "reason": "可以将需要掌握的内容分散到不同时间进行重复学习，而不是集中在一次学习中完成大量重复。",
+            "sourceIds": [
+                "source-005"
+            ]
+        }
+    ],
+    "notSuitableFor": [
+        {
+            "label": "需要立即完成的短期任务",
+            "reason": "间隔学习强调重复学习之间存在时间间隔，因此不一定适合必须在极短时间内完成的学习任务。",
+            "sourceIds": [
+                "source-005"
+            ]
+        },
+        {
+            "label": "需要立即获得集中训练效果的情境",
+            "reason": "部分研究显示，集中学习在短期表现上可能具有优势，而间隔学习的优势可能在较长时间后更加明显。",
+            "sourceIds": [
+                "source-005"
+            ]
+        }
+    ],
+    "conditions": [
+        {
+            "condition": "重复学习之间需要存在一定时间间隔",
+            "sourceIds": [
+                "source-005"
+            ]
+        },
+        {
+            "condition": "间隔长度不能简单理解为越长越好",
+            "sourceIds": [
+                "source-005"
+            ]
+        },
+        {
+            "condition": "最佳间隔可能受到任务类型、学习材料和学习周期影响",
+            "sourceIds": [
+                "source-005"
+            ]
+        }
+    ],
+    "evidence": [
+        {
+            "claim": "间隔学习通常比集中学习具有更好的记忆效果。",
+            "sourceIds": [
+                "source-005"
+            ]
+        },
+        {
+            "claim": "间隔学习对长期记忆保持具有较好的促进作用。",
+            "sourceIds": [
+                "source-005"
+            ]
+        },
+        {
+            "claim": "间隔学习的效果可能受到任务类型、学习类型和时间间隔等因素影响。",
+            "sourceIds": [
+                "source-005"
+            ]
+        }
+    ],
+    "limitations": [
+        "不同学习任务可能表现出不同程度的间隔效应。",
+        "并不存在一个适用于所有学习任务的固定最佳间隔。",
+        "间隔过长可能导致学习效果下降。",
+        "本文属于研究综述，具体推荐参数还需要结合更多实证研究。"
+    ],
+    "sourceIds": [
+        "source-005"
+    ],
+    "recommendation": {
+        "evidenceScore": null,
+        "communityScore": null,
+        "effectivenessScore": null,
+        "overallScore": null,
+        "triedCount": 0,
+        "helpfulCount": 0
+    },
+    "reviewStatus": "draft"
+}

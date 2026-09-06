@@ -1,0 +1,146 @@
+{
+    "strategyId": "strategy-learning-motivation-types",
+    "name": "学习动机与学习策略类型",
+    "aliases": [
+        "表面型动机",
+        "深层型动机",
+        "成就型动机",
+        "表面型策略",
+        "深层型策略",
+        "成就型策略"
+    ],
+    "summary": "该研究将中学生的学习动机划分为表面型动机、深层型动机和成就型动机，并将学习策略划分为表面型策略、深层型策略和成就型策略，同时考察二者之间的关系及其年级发展特点。",
+    "motivationTypes": [
+        {
+            "type": "surface_motivation",
+            "name": "表面型动机",
+            "description": "为了应付检查和考试及格而进行学习。",
+            "behaviorTendency": [
+                "应付学习要求",
+                "关注考试",
+                "关注是否及格"
+            ],
+            "relatedStrategy": "surface_strategy",
+            "sourceIds": [
+                "source-004"
+            ]
+        },
+        {
+            "type": "deep_motivation",
+            "name": "深层型动机",
+            "description": "因为对所学内容具有内在兴趣，为了弄懂和掌握知识而学习。",
+            "behaviorTendency": [
+                "关注理解",
+                "关注知识掌握",
+                "对学习内容感兴趣"
+            ],
+            "relatedStrategy": "deep_strategy",
+            "sourceIds": [
+                "source-004"
+            ]
+        },
+        {
+            "type": "achievement_motivation",
+            "name": "成就型动机",
+            "description": "为了获得高分和得到表扬而进行学习。",
+            "behaviorTendency": [
+                "关注成绩",
+                "追求高分",
+                "关注教师和家长评价"
+            ],
+            "relatedStrategy": "achievement_strategy",
+            "sourceIds": [
+                "source-004"
+            ]
+        }
+    ],
+    "strategyTypes": [
+        {
+            "type": "surface_strategy",
+            "name": "表面型策略",
+            "description": "采取应付性的、肤浅性的、消极被动的学习方法。",
+            "sourceIds": [
+                "source-004"
+            ]
+        },
+        {
+            "type": "deep_strategy",
+            "name": "深层型策略",
+            "description": "采取钻研性的、探索性的、积极主动的学习方法。",
+            "sourceIds": [
+                "source-004"
+            ]
+        },
+        {
+            "type": "achievement_strategy",
+            "name": "成就型策略",
+            "description": "学习行为较大程度受到他人观点影响，倾向于采用教师和家长等外部环境所提倡的学习方式。",
+            "sourceIds": [
+                "source-004"
+            ]
+        }
+    ],
+    "userProfiles": [
+        {
+            "profileId": "profile-surface",
+            "name": "表面型学习者",
+            "features": [
+                "主要为了应付考试或检查",
+                "容易采用消极被动的学习方式",
+                "关注是否完成外部要求"
+            ],
+            "evidence": "表面型动机与表面型策略呈显著正相关。",
+            "sourceIds": [
+                "source-004"
+            ]
+        },
+        {
+            "profileId": "profile-deep",
+            "name": "深层型学习者",
+            "features": [
+                "对学习内容具有兴趣",
+                "关注理解和掌握知识",
+                "倾向于钻研和探索",
+                "倾向于积极主动学习"
+            ],
+            "evidence": "深层型动机与深层型策略呈显著正相关。",
+            "sourceIds": [
+                "source-004"
+            ]
+        },
+        {
+            "profileId": "profile-achievement",
+            "name": "成就型学习者",
+            "features": [
+                "关注高分",
+                "关注表扬",
+                "学习行为容易受到教师和家长评价影响"
+            ],
+            "evidence": "成就型动机与深层型策略、成就型策略均具有显著相关。",
+            "sourceIds": [
+                "source-004"
+            ]
+        }
+    ],
+    "developmentPatterns": [
+        {
+            "feature": "年级",
+            "pattern": "表面型动机和表面型策略总体随年级升高而增加；深层型动机和深层型策略总体随年级升高而减弱。",
+            "sourceIds": [
+                "source-004"
+            ]
+        }
+    ],
+    "sourceIds": [
+        "source-004"
+    ],
+    "recommendation": {
+        "evidenceScore": 0,
+        "communityScore": 0,
+        "effectivenessScore": 0,
+        "overallScore": 0,
+        "triedCount": 0,
+        "helpfulCount": 0
+    },
+    "reviewStatus": "draft"
+}
