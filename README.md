@@ -55,3 +55,17 @@ mvn compile exec:java "-Dexec.mainClass=DocumentExtractor" "-Dexec.args=资料�
 - `data/cleaned/source-003.report.json`：清洗统计报告。
 
 自动清洗后仍应抽查复杂双栏、表格和扫描 PDF 的内容，再将 `cleaned` 文件交给递归切割脚本。
+
+## 从策略档案生成最终 Chunk
+
+`generate_strategy_chunks.py` 读取 `data/strategies/*.json`，将策略的定义、每个实施步骤、每个适用条件和每个不适用条件分别生成可检索的 JSONL Chunk。
+
+```powershell
+python .\generate_strategy_chunks.py
+```
+
+默认输出到 `data/chunks/strategy-*.jsonl`，并生成 `data/chunks/generation-report.json`。无效文件会被跳过并记录在报告中；需要在发现错误时返回失败状态可使用：
+
+```powershell
+python .\generate_strategy_chunks.py --strict
+```
