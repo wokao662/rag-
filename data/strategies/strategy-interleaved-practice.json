@@ -1,0 +1,60 @@
+{
+  "strategyId": "strategy-interleaved-practice",
+  "name": "交叉练习",
+  "aliases": [
+    "交替学习",
+    "interleaved practice"
+  ],
+  "summary": "交替学习不同类型的材料或问题，而非集中学习同一种类型，通过比较和区分不同类型来提升辨别能力和迁移能力。",
+  "steps": [
+    "选择包含多种类型材料或问题的学习材料",
+    "打乱练习顺序，不按类型分组练习",
+    "交替练习不同类型的题目或概念",
+    "在练习中注意比较不同类型之间的差异和联系",
+    "综合应用所学解决混合类型的题目"
+  ],
+  "suitableFor": [
+    {
+      "label": "数学、科学等需要区分问题类型的学科",
+      "reason": "交叉练习能帮助学生学会识别问题类型并选择正确的解题策略，显著提升迁移表现。",
+      "sourceIds": [
+        "source-006"
+      ]
+    },
+    {
+      "label": "艺术鉴赏等需要辨别能力的领域",
+      "reason": "在艺术鉴赏中，交叉练习不同画家的作品能帮助学生更好地辨别风格特征。",
+      "sourceIds": [
+        "source-006"
+      ]
+    }
+  ],
+  "notSuitableFor": [
+    {
+      "label": "初次学习新技能的基础阶段",
+      "reason": "在学习初期，集中学习（块状练习）有助于快速建立基本技能和理解。",
+      "sourceIds": [
+        "source-006"
+      ]
+    },
+    {
+      "label": "需要快速掌握单一技能的任务",
+      "reason": "交叉练习在即时测试中效果可能不如集中学习，短期效率较低。",
+      "sourceIds": [
+        "source-006"
+      ]
+    }
+  ],
+  "sourceIds": [
+    "source-006"
+  ],
+  "recommendation": {
+    "evidenceScore": 0.6,
+    "communityScore": 0.5,
+    "effectivenessScore": 0.6,
+    "overallScore": 0.57,
+    "triedCount": 0,
+    "helpfulCount": 0
+  },
+  "reviewStatus": "draft"
+}
