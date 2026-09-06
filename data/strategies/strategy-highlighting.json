@@ -1,0 +1,52 @@
+{
+  "strategyId": "strategy-highlighting",
+  "name": "画线/高亮",
+  "aliases": [
+    "下划线",
+    "highlighting",
+    "underlining"
+  ],
+  "summary": "用荧光笔或下划线标记阅读材料中认为重要的内容，以帮助注意和后续复习。",
+  "steps": [
+    "阅读学习材料",
+    "用荧光笔或下划线标记重要内容",
+    "标记完成后回顾标记过的内容"
+  ],
+  "suitableFor": [
+    {
+      "label": "需要快速定位关键信息的大致浏览",
+      "reason": "画线可以帮助学习者在初次接触材料时快速识别重要内容的位置。",
+      "sourceIds": [
+        "source-006"
+      ]
+    }
+  ],
+  "notSuitableFor": [
+    {
+      "label": "需要深度理解和长期记忆的任务",
+      "reason": "大量研究表明画线对理解力和记忆保持几乎没有显著帮助，效果与单纯阅读无异。",
+      "sourceIds": [
+        "source-006"
+      ]
+    },
+    {
+      "label": "材料本身已有关键信息标记的情况",
+      "reason": "当材料中已有预标记时，额外画线不再带来额外收益。",
+      "sourceIds": [
+        "source-006"
+      ]
+    }
+  ],
+  "sourceIds": [
+    "source-006"
+  ],
+  "recommendation": {
+    "evidenceScore": 0.2,
+    "communityScore": 0.8,
+    "effectivenessScore": 0.2,
+    "overallScore": 0.4,
+    "triedCount": 0,
+    "helpfulCount": 0
+  },
+  "reviewStatus": "draft"
+}
