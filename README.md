@@ -159,6 +159,12 @@ docker exec rag-postgres pg_isready -U learning_app -d learning_app
 docker exec rag-postgres psql -U learning_app -d learning_app -c "\dt"
 ```
 
+验证 Java JDBC 连接和四张表的读写（测试数据会在事务中回滚）：
+
+```powershell
+mvn compile exec:java "-Dexec.mainClass=DatabaseConnectionTest"
+```
+
 停止服务但保留数据：
 
 ```powershell
