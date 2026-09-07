@@ -27,6 +27,8 @@ public final class UserProfileConversationTest {
 
         try (UserProfileExtractor extractor = new UserProfileExtractor(
                 AppConfig.require("SILICONFLOW_API_KEY"));
+             ConversationalProfileAgent profileAgent = new ConversationalProfileAgent(
+                     AppConfig.require("SILICONFLOW_API_KEY"));
              Scanner scanner = new Scanner(System.in, StandardCharsets.UTF_8)) {
             UUID userId;
             UUID conversationId;
@@ -62,15 +64,30 @@ public final class UserProfileConversationTest {
                 JsonObject extraction = extractor.extract(existingProfile, recent, input);
                 UserProfileValidator.ValidationResult validation = validator.validate(extraction, input);
                 JsonObject merged = merger.merge(existingProfile, validation.acceptedUpdates(), userMessageId);
-                ProfileReadinessPolicy.Decision decision = readiness.evaluate(merged);
+                ProfileReadinessPolicy.Decision fallbackDecision = readiness.evaluate(merged);
+                ProfileDecisionValidator.Decision decision;
+                try {
+                    decision = profileAgent.decide(merged, recent);
+                } catch (Exception agentError) {
+                    System.err.println("画像 Agent 暂时不可用，已使用本地规则继续：" + agentError.getMessage());
+                    decision = new ProfileDecisionValidator.Decision(
+                            fallbackDecision.ready() ? "recommend" : "ask",
+                            fallbackDecision.ready(), 0,
+                            "画像 Agent 调用失败，使用本地兜底规则",
+                            fallbackDecision.missingFields(), List.of(),
+                            fallbackDecision.followUpQuestion() == null
+                                    ? "" : fallbackDecision.followUpQuestion());
+                }
 
                 try (Connection connection = Database.getConnection()) {
                     connection.setAutoCommit(false);
-                    profiles.save(connection, userId, merged, decision.completeness());
+                    profiles.save(connection, userId, merged, fallbackDecision.completeness());
                     if (!decision.ready()) {
                         JsonObject metadata = new JsonObject();
                         metadata.addProperty("messageType", "profile_question");
-                        messages.save(connection, conversationId, "assistant", decision.followUpQuestion(), metadata);
+                        metadata.addProperty("decisionConfidence", decision.confidence());
+                        metadata.addProperty("decisionReason", decision.reason());
+                        messages.save(connection, conversationId, "assistant", decision.nextQuestion(), metadata);
                     }
                     connection.commit();
                 }
@@ -82,11 +99,16 @@ public final class UserProfileConversationTest {
                 }
                 System.out.println("当前画像：");
                 System.out.println(GSON.toJson(merged));
-                System.out.printf("ready=%s，completeness=%.2f%n", decision.ready(), decision.completeness());
+                System.out.printf("ready=%s，completeness=%.2f，decisionConfidence=%.2f%n",
+                        decision.ready(), fallbackDecision.completeness(), decision.confidence());
+                System.out.println("画像 Agent 判断：" + decision.reason());
+                if (!decision.conflicts().isEmpty()) {
+                    System.out.println("需要确认的信息冲突：" + GSON.toJson(decision.conflicts()));
+                }
                 if (decision.ready()) {
                     System.out.println("画像已足够进行初步推荐，下一阶段可进入 Qdrant。\n");
                 } else {
-                    System.out.println("助手：" + decision.followUpQuestion() + "\n");
+                    System.out.println("助手：" + decision.nextQuestion() + "\n");
                 }
             }
         } catch (Exception error) {
