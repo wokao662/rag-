@@ -128,3 +128,41 @@ QDRANT_URL=http://服务器地址:6333
 - `data/chunks`、`data/extracted`、`data/cleaned` 和 `target` 都是本地生成物，不提交。
 - 每位开发者使用自己的 `.env` 或系统环境变量；仓库只提供不含秘密的 `.env.example`。
 - Qdrant 运行数据保存在 Docker 命名卷 `qdrant_storage` 中，不提交到 Git。
+
+## PostgreSQL 用户与对话数据库
+
+PostgreSQL 用于保存用户、多轮会话、消息和用户画像；Qdrant 继续只负责策略向量检索。
+本地数据保存在 Docker 命名卷 `rag_postgres_data`，不会写进仓库目录。
+
+在本机 `.env` 中补充：
+
+```dotenv
+POSTGRES_DB=learning_app
+POSTGRES_USER=learning_app
+POSTGRES_PASSWORD=请设置本地开发密码
+POSTGRES_PORT=5432
+```
+
+你已有手动创建的 `qdrant` 容器时，先只启动 PostgreSQL，避免 Compose 尝试创建同名 Qdrant：
+
+```powershell
+docker compose up -d postgres
+docker compose ps postgres
+docker exec rag-postgres pg_isready -U learning_app -d learning_app
+```
+
+第一次创建 `rag_postgres_data` 时，PostgreSQL 会自动执行 `database/init/001_schema.sql`，建立 `users`、`conversations`、`messages` 和 `user_profiles` 四张表。初始化脚本只在空数据卷首次启动时执行；未来结构升级应使用迁移脚本，不要删除数据卷重建。
+
+查看数据表：
+
+```powershell
+docker exec rag-postgres psql -U learning_app -d learning_app -c "\dt"
+```
+
+停止服务但保留数据：
+
+```powershell
+docker compose stop postgres
+```
+
+不要执行 `docker compose down -v` 或 `docker volume rm rag_postgres_data`，这些命令会删除数据库数据。
