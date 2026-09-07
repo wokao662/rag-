@@ -165,6 +165,14 @@ docker exec rag-postgres psql -U learning_app -d learning_app -c "\dt"
 mvn compile exec:java "-Dexec.mainClass=DatabaseConnectionTest"
 ```
 
+运行持久化多轮用户画像测试（输入 `exit` 结束）：
+
+```powershell
+mvn compile exec:java "-Dexec.mainClass=UserProfileConversationTest"
+```
+
+测试程序将每轮消息和通过 Java 校验的画像保存到 PostgreSQL。当前只接受用户明确表达的信息；画像具备主要困难，或同时具备学习目标与学习内容时，会显示 `ready=true`。这一阶段只验证画像抽取、校验、合并、追问和持久化，暂不进入 Qdrant 推荐。
+
 停止服务但保留数据：
 
 ```powershell

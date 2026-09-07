@@ -52,6 +52,8 @@
                 <version>3.5.1</version>
                 <configuration>
                     <mainClass>${exec.mainClass}</mainClass>
+                    <!-- OkHttp/Okio use shared daemon threads; let the JVM end them naturally. -->
+                    <cleanupDaemonThreads>false</cleanupDaemonThreads>
                 </configuration>
             </plugin>
         </plugins>
