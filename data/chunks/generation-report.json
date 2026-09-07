@@ -1,7 +1,22 @@
 {
-  "generatedStrategies": 10,
-  "generatedChunks": 92,
+  "generatedStrategies": 13,
+  "generatedChunks": 107,
   "generated": [
+    {
+      "file": "source-003.json",
+      "output": "strategy-learning-strategy-classification.jsonl",
+      "chunks": 2
+    },
+    {
+      "file": "source-004.json",
+      "output": "strategy-learning-motivation-types.jsonl",
+      "chunks": 1
+    },
+    {
+      "file": "source-005.json",
+      "output": "strategy-spaced-learning.jsonl",
+      "chunks": 12
+    },
     {
       "file": "strategy-distributed-practice.json",
       "output": "strategy-distributed-practice.jsonl",
