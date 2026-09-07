@@ -1,0 +1,19 @@
+# Local secrets and machine-specific configuration
+.env
+.env.*
+!.env.example
+
+# Maven build output
+target/
+
+# Generated RAG artifacts (rebuild from data/strategies)
+data/chunks/
+data/extracted/
+data/cleaned/
+
+# Editor and operating-system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+

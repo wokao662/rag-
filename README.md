@@ -75,12 +75,22 @@ python .\generate_strategy_chunks.py --strict
 当前配置为硅基流动 `Qwen/Qwen3-Embedding-4B`、1024 维稠密向量，以及 Qdrant `Cosine` 相似度。
 搜索时会为用户问题添加检索任务指令，知识库 chunk 保持原文向量化。
 
-先启动 Qdrant，并在当前 VS Code PowerShell 会话中设置硅基流动 API Key：
+首次使用时复制配置模板，并把占位值替换为自己的硅基流动 API Key：
 
 ```powershell
-docker start qdrant
-$env:SILICONFLOW_API_KEY="你的硅基流动 API Key"
+Copy-Item .env.example .env
 ```
+
+`.env` 只保存在本机且已被 Git 忽略。Java 会优先读取系统环境变量，没有时读取项目根目录的 `.env`。
+不要把真实 Key 发到 Git、聊天记录或截图中。
+
+使用 Compose 启动统一配置的 Qdrant：
+
+```powershell
+docker compose up -d
+```
+
+如果本机已经有手动创建且名为 `qdrant` 的容器，可以继续使用 `docker start qdrant`；迁移到 Compose 前需要先停止并移除旧容器，但命名卷 `qdrant_storage` 可以保留并复用。
 
 生成最终 chunk 后执行入库：
 
@@ -106,8 +116,15 @@ mvn compile exec:java "-Dexec.mainClass=RagRecommendationTest" "-Dexec.args=我�
 
 这是命令行测试版：单轮调用、不保存用户画像和历史对话。Prompt 已包含知识来源限定、稳定 chunkId 引用、信息不足澄清、无匹配兜底和基础注入防护。
 
-Qdrant 默认地址是 `http://127.0.0.1:6333`。如果以后连接其他 Qdrant，可设置：
+Qdrant 默认地址是 `http://127.0.0.1:6333`。如果以后连接其他 Qdrant，可在 `.env` 修改：
 
-```powershell
-$env:QDRANT_URL="http://服务器地址:6333"
+```dotenv
+QDRANT_URL=http://服务器地址:6333
 ```
+
+## 团队协作约定
+
+- Git 只保存代码、`data/sources` 和 `data/strategies` 等原始数据。
+- `data/chunks`、`data/extracted`、`data/cleaned` 和 `target` 都是本地生成物，不提交。
+- 每位开发者使用自己的 `.env` 或系统环境变量；仓库只提供不含秘密的 `.env.example`。
+- Qdrant 运行数据保存在 Docker 命名卷 `qdrant_storage` 中，不提交到 Git。

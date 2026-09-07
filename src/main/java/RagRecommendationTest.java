@@ -82,10 +82,13 @@ public final class RagRecommendationTest {
             System.exit(1);
         }
 
-        String apiKey = System.getenv("SILICONFLOW_API_KEY");
-        if (apiKey == null || apiKey.isBlank()) {
-            System.err.println("缺少 SILICONFLOW_API_KEY 环境变量");
+        String apiKey;
+        try {
+            apiKey = AppConfig.require("SILICONFLOW_API_KEY");
+        } catch (IllegalStateException error) {
+            System.err.println(error.getMessage());
             System.exit(1);
+            return;
         }
 
         String question = String.join(" ", Arrays.asList(args)).trim();

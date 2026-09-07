@@ -14,7 +14,7 @@ public final class StrategySearcher {
 
         String query = String.join(" ", Arrays.asList(args)).trim();
         try {
-            try (EmbeddingClient embedding = new EmbeddingClient(System.getenv("SILICONFLOW_API_KEY"));
+            try (EmbeddingClient embedding = new EmbeddingClient(AppConfig.require("SILICONFLOW_API_KEY"));
                  QdrantClient qdrant = new QdrantClient(StrategyIndexer.qdrantUrl())) {
                 qdrant.ensureCollection(EmbeddingClient.DIMENSION);
                 List<Float> queryVector = embedding.embedQuery(query);

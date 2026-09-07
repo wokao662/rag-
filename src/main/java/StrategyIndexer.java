@@ -22,7 +22,7 @@ public final class StrategyIndexer {
                 throw new IllegalStateException("data/chunks 中没有可入库的 .jsonl chunk");
             }
 
-            try (EmbeddingClient embedding = new EmbeddingClient(System.getenv("SILICONFLOW_API_KEY"));
+            try (EmbeddingClient embedding = new EmbeddingClient(AppConfig.require("SILICONFLOW_API_KEY"));
                  QdrantClient qdrant = new QdrantClient(qdrantUrl())) {
                 qdrant.ensureCollection(EmbeddingClient.DIMENSION);
 
@@ -92,7 +92,6 @@ public final class StrategyIndexer {
     }
 
     static String qdrantUrl() {
-        String configured = System.getenv("QDRANT_URL");
-        return configured == null || configured.isBlank() ? "http://127.0.0.1:6333" : configured.trim();
+        return AppConfig.getOrDefault("QDRANT_URL", "http://127.0.0.1:6333");
     }
 }
