@@ -1,6 +1,7 @@
-DocumentExtractor.class
 StrategySearcher.class
-LLMTest.class
 QdrantClient.class
+DocumentExtractor.class
+RagRecommendationTest.class
+LLMTest.class
 StrategyIndexer.class
 EmbeddingClient.class
