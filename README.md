@@ -171,6 +171,14 @@ mvn compile exec:java "-Dexec.mainClass=DatabaseConnectionTest"
 mvn compile exec:java "-Dexec.mainClass=UserProfileConversationTest"
 ```
 
+在 `feature/conversational-profile-agent` 分支中，这个测试会在每轮画像抽取后再次调用聊天模型：
+
+- 根据当前画像和最近对话动态决定继续追问（`ask`）还是进入推荐（`recommend`）。
+- 每次只追问一个最关键的问题，并避免重复询问已经回答的内容。
+- 模型只能检查信息是否一致，不能判定用户是否说谎，也不得进行疾病、智力或人格诊断。
+- Agent 输出必须通过 Java 结构校验；接口失败或输出不合规时自动使用 `ProfileReadinessPolicy` 本地规则兜底。
+- 这个阶段仍只显示 `ready=true`，尚未自动调用 Qdrant 推荐。
+
 测试程序将每轮消息和通过 Java 校验的画像保存到 PostgreSQL。当前只接受用户明确表达的信息；画像具备主要困难，或同时具备学习目标与学习内容时，会显示 `ready=true`。这一阶段只验证画像抽取、校验、合并、追问和持久化，暂不进入 Qdrant 推荐。
 
 停止服务但保留数据：
