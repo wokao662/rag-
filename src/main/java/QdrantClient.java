@@ -98,7 +98,8 @@ public final class QdrantClient implements AutoCloseable {
 
     @Override
     public void close() {
-        httpClient.dispatcher().executorService().shutdown();
+        httpClient.dispatcher().cancelAll();
+        httpClient.dispatcher().executorService().shutdownNow();
         httpClient.connectionPool().evictAll();
         if (httpClient.cache() != null) {
             try {
