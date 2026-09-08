@@ -198,3 +198,46 @@ docker compose stop postgres
 ```
 
 不要执行 `docker compose down -v` 或 `docker volume rm rag_postgres_data`，这些命令会删除数据库数据。
+
+## Spring Boot 后端
+
+正式后端入口为 `com.example.rag.RagApplication`。旧的命令行测试类暂时保留，用于验证模型和 RAG 链路，但 WebApp 后续只调用 Spring Boot HTTP API。
+
+先启动 PostgreSQL：
+
+```powershell
+docker compose up -d postgres
+```
+
+再启动后端：
+
+```powershell
+mvn spring-boot:run
+```
+
+默认监听 `http://127.0.0.1:8080`。验证应用接口：
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8080/api/v1/status
+```
+
+验证包含数据库连接状态的健康检查：
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8080/actuator/health
+```
+
+数据库结构现在由 `src/main/resources/db/migration` 下的 Flyway 迁移管理。已有数据库首次启动时会建立 Flyway 基线；新数据库会执行 `V1__initial_schema.sql`。后续改表应新增 `V2__...sql`、`V3__...sql`，不要修改已经在共享环境执行过的旧迁移。
+
+构建并运行自动化测试：
+
+```powershell
+mvn test
+```
+
+生成可部署 JAR：
+
+```powershell
+mvn clean package
+java -jar target/rag-demo-1.0-SNAPSHOT.jar
+```
