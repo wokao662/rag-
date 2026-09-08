@@ -171,6 +171,16 @@ mvn compile exec:java "-Dexec.mainClass=DatabaseConnectionTest"
 mvn compile exec:java "-Dexec.mainClass=UserProfileConversationTest"
 ```
 
+不提供参数时，程序会为本次运行生成一个独立的测试用户，避免读取上一次测试遗留的画像。终端输入使用 JVM 当前默认编码；在中文 Windows 环境中通常为 GBK，避免强制按 UTF-8 读取造成乱码。
+
+如果需要跨多次运行继续测试同一个用户，可以明确指定稳定的用户 ID：
+
+```powershell
+mvn compile exec:java "-Dexec.mainClass=UserProfileConversationTest" "-Dexec.args=profile-test-user-001"
+```
+
+指定相同 ID 会有意复用该用户在 PostgreSQL 中的历史画像；需要测试全新画像时不要传入 ID，或者改用新的 ID。
+
 在 `feature/conversational-profile-agent` 分支中，这个测试会在每轮画像抽取后再次调用聊天模型：
 
 - 根据当前画像和最近对话动态决定继续追问（`ask`）还是进入推荐（`recommend`）。
