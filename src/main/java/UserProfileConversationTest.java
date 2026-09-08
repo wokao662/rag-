@@ -2,7 +2,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 
-import java.nio.charset.StandardCharsets;
+import java.nio.charset.Charset;
 import java.sql.Connection;
 import java.util.List;
 import java.util.Scanner;
@@ -16,7 +16,10 @@ public final class UserProfileConversationTest {
     }
 
     public static void main(String[] args) {
-        String externalId = args.length == 0 ? "local-profile-test-user" : args[0].trim();
+        boolean generatedTestUser = args.length == 0 || args[0].isBlank();
+        String externalId = generatedTestUser
+                ? "local-profile-test-" + UUID.randomUUID().toString().substring(0, 8)
+                : args[0].trim();
         UserRepository users = new UserRepository();
         ConversationRepository conversations = new ConversationRepository();
         MessageRepository messages = new MessageRepository();
@@ -29,7 +32,7 @@ public final class UserProfileConversationTest {
                 AppConfig.require("SILICONFLOW_API_KEY"));
              ConversationalProfileAgent profileAgent = new ConversationalProfileAgent(
                      AppConfig.require("SILICONFLOW_API_KEY"));
-             Scanner scanner = new Scanner(System.in, StandardCharsets.UTF_8)) {
+             Scanner scanner = new Scanner(System.in, Charset.defaultCharset())) {
             UUID userId;
             UUID conversationId;
             try (Connection connection = Database.getConnection()) {
@@ -40,6 +43,12 @@ public final class UserProfileConversationTest {
             }
 
             System.out.println("画像测试已开始。用户=" + externalId + "，会话=" + conversationId);
+            System.out.println("终端输入编码=" + Charset.defaultCharset().displayName());
+            if (generatedTestUser) {
+                System.out.println("本次未指定用户 ID，已创建独立测试用户，不会读取以前的测试画像。");
+            } else {
+                System.out.println("本次复用指定用户 ID，将继续读取该用户以前保存的画像。");
+            }
             System.out.println("输入 exit 结束。画像足够推荐时程序会显示 ready=true，但暂不调用 Qdrant。\n");
 
             while (true) {
