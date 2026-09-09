@@ -241,3 +241,33 @@ mvn test
 mvn clean package
 java -jar target/rag-demo-1.0-SNAPSHOT.jar
 ```
+
+### 用户画像 API（开发版）
+
+创建或识别用户并开始新会话：
+
+```powershell
+$conversation = Invoke-RestMethod `
+  -Method Post `
+  -Uri http://127.0.0.1:8080/api/v1/users/web-user-001/conversations
+$conversation
+```
+
+发送一条消息，其中 `$conversation.conversationId` 来自上一步：
+
+```powershell
+$body = @{ content = "我背英语单词很快忘，每天可以学习30分钟" } | ConvertTo-Json
+Invoke-RestMethod `
+  -Method Post `
+  -ContentType "application/json; charset=utf-8" `
+  -Uri "http://127.0.0.1:8080/api/v1/users/web-user-001/conversations/$($conversation.conversationId)/messages" `
+  -Body $body
+```
+
+查询当前画像：
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8080/api/v1/users/web-user-001/profile
+```
+
+当前 URL 中的 `externalId` 只是开发阶段用于串联数据的稳定标识，不是登录凭证。正式对外部署前必须接入认证，由服务端从已验证的 Token 中取得用户身份，不能信任前端任意传入的用户 ID。
