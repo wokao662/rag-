@@ -11,6 +11,7 @@ import java.util.UUID;
 
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -31,6 +32,7 @@ class UserProfileControllerTest {
 
         mockMvc.perform(post("/api/v1/users/web-user-001/conversations"))
                 .andExpect(status().isCreated())
+                .andExpect(content().contentTypeCompatibleWith("application/json;charset=UTF-8"))
                 .andExpect(jsonPath("$.userId").value(userId.toString()))
                 .andExpect(jsonPath("$.conversationId").value(conversationId.toString()));
     }
