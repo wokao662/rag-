@@ -85,6 +85,33 @@ public final class QdrantClient implements AutoCloseable {
         throw new IOException("Qdrant 查询响应中缺少 result.points");
     }
 
+    /** 按策略 ID 拉回这些策略的全部 chunk，用于把召回片段补齐成完整资料。 */
+    public JsonArray findByStrategyIds(List<String> strategyIds) throws IOException {
+        JsonArray any = new JsonArray();
+        strategyIds.forEach(any::add);
+        JsonObject match = new JsonObject();
+        match.add("any", any);
+        JsonObject condition = new JsonObject();
+        condition.addProperty("key", "strategyId");
+        condition.add("match", match);
+        JsonArray must = new JsonArray();
+        must.add(condition);
+        JsonObject filter = new JsonObject();
+        filter.add("must", must);
+        JsonObject body = new JsonObject();
+        body.add("filter", filter);
+        body.addProperty("limit", 100);
+        body.addProperty("with_payload", true);
+        body.addProperty("with_vector", false);
+        JsonObject response = executeJson("POST",
+                baseUrl + "/collections/" + COLLECTION + "/points/scroll", body);
+        JsonElement result = response.get("result");
+        if (result != null && result.isJsonObject() && result.getAsJsonObject().has("points")) {
+            return result.getAsJsonObject().getAsJsonArray("points");
+        }
+        throw new IOException("Qdrant 查询响应中缺少 result.points");
+    }
+
     private JsonObject executeJson(String method, String url, JsonObject body) throws IOException {
         RequestBody requestBody = RequestBody.create(body.toString(), JSON);
         Request.Builder builder = new Request.Builder().url(url);
