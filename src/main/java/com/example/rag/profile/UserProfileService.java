@@ -1,8 +1,11 @@
 package com.example.rag.profile;
 
+import com.example.rag.recommendation.RecommendationService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.gson.Gson;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.jdbc.datasource.DataSourceUtils;
 import org.springframework.stereotype.Service;
@@ -20,6 +23,7 @@ import java.util.UUID;
 @Service
 public class UserProfileService {
     private static final int RECENT_MESSAGE_LIMIT = 12;
+    private static final Gson GSON = new Gson();
 
     private final DataSource dataSource;
     private final TransactionTemplate transactions;
@@ -29,6 +33,7 @@ public class UserProfileService {
     private final UserProfileValidator validator;
     private final UserProfileMerger merger;
     private final ProfileReadinessPolicy readinessPolicy;
+    private final RecommendationService recommendationService;
     private final UserRepository users = new UserRepository();
     private final ConversationRepository conversations = new ConversationRepository();
     private final MessageRepository messages = new MessageRepository();
@@ -42,7 +47,8 @@ public class UserProfileService {
             ConversationalProfileAgent profileAgent,
             UserProfileValidator validator,
             UserProfileMerger merger,
-            ProfileReadinessPolicy readinessPolicy
+            ProfileReadinessPolicy readinessPolicy,
+            RecommendationService recommendationService
     ) {
         this.dataSource = dataSource;
         this.transactions = transactions;
@@ -52,6 +58,7 @@ public class UserProfileService {
         this.validator = validator;
         this.merger = merger;
         this.readinessPolicy = readinessPolicy;
+        this.recommendationService = recommendationService;
     }
 
     public ConversationStarted startConversation(String externalId) {
@@ -91,6 +98,16 @@ public class UserProfileService {
         ProfileReadinessPolicy.Decision fallback = readinessPolicy.evaluate(merged);
         ProfileDecisionValidator.Decision decision = decideWithFallback(merged, context.recentMessages(), fallback);
 
+        RecommendationService.RecommendationResult recommendation = null;
+        if (decision.ready()) {
+            try {
+                recommendation = recommendationService.recommend(merged);
+            } catch (RecommendationService.RecommendationUnavailableException ignored) {
+                // 推荐失败不阻断画像流程，前端可稍后通过推荐接口重试。
+            }
+        }
+
+        RecommendationService.RecommendationResult finalRecommendation = recommendation;
         inTransaction(connection -> {
             boolean saved = profiles.saveIfVersion(
                     connection, context.userId(), merged, fallback.completeness(), context.profileVersion());
@@ -101,6 +118,12 @@ public class UserProfileService {
                 metadata.addProperty("decisionConfidence", decision.confidence());
                 metadata.addProperty("decisionReason", decision.reason());
                 messages.save(connection, conversationId, "assistant", decision.nextQuestion(), metadata);
+            } else if (finalRecommendation != null) {
+                JsonObject metadata = new JsonObject();
+                metadata.addProperty("messageType", "recommendation");
+                metadata.addProperty("recommendationStatus", finalRecommendation.status());
+                metadata.add("recommendation", JsonParser.parseString(GSON.toJson(finalRecommendation)));
+                messages.save(connection, conversationId, "assistant", finalRecommendation.answer(), metadata);
             }
             return null;
         });
@@ -109,7 +132,7 @@ public class UserProfileService {
                 decision.action(), decision.ready(), fallback.completeness(), decision.confidence(),
                 decision.reason(), decision.nextQuestion(), decision.missingInformation(),
                 decision.conflicts(), toMap(merged), toMap(validation.acceptedUpdates()),
-                validation.rejections().size());
+                validation.rejections().size(), finalRecommendation);
     }
 
     public ProfileResult getProfile(String externalId) {
@@ -122,6 +145,17 @@ public class UserProfileService {
                             profile.completeness(), profile.updatedAt().toString()))
                     .orElseThrow(() -> new ProfileNotFoundException("该用户还没有画像"));
         });
+    }
+
+    public RecommendationService.RecommendationResult recommend(String externalId) {
+        String normalizedId = normalizeExternalId(externalId);
+        JsonObject profile = inTransaction(connection -> {
+            UUID userId = requireUser(connection, normalizedId);
+            return profiles.findByUserId(connection, userId)
+                    .map(UserProfileRepository.StoredProfile::profile)
+                    .orElseThrow(() -> new ProfileNotFoundException("该用户还没有画像"));
+        });
+        return recommendationService.recommend(profile);
     }
 
     private ProfileDecisionValidator.Decision decideWithFallback(
@@ -211,7 +245,8 @@ public class UserProfileService {
             List<String> conflicts,
             Map<String, Object> profile,
             Map<String, Object> acceptedUpdates,
-            int rejectedUpdateCount
+            int rejectedUpdateCount,
+            RecommendationService.RecommendationResult recommendation
     ) {
     }
 

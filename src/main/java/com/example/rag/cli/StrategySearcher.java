@@ -1,3 +1,8 @@
+package com.example.rag.cli;
+
+import com.example.rag.AppConfig;
+import com.example.rag.recommendation.EmbeddingClient;
+import com.example.rag.recommendation.QdrantClient;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 

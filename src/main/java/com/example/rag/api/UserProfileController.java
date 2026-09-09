@@ -1,6 +1,7 @@
 package com.example.rag.api;
 
 import com.example.rag.profile.UserProfileService;
+import com.example.rag.recommendation.RecommendationService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
@@ -44,6 +45,14 @@ public class UserProfileController {
             @Valid @RequestBody SendMessageRequest request
     ) {
         return profileService.processMessage(externalId, conversationId, request.content());
+    }
+
+    @PostMapping("/recommendations")
+    public RecommendationService.RecommendationResult recommend(
+            @PathVariable @NotBlank @Size(max = 128)
+            @Pattern(regexp = "[A-Za-z0-9._-]+") String externalId
+    ) {
+        return profileService.recommend(externalId);
     }
 
     @GetMapping("/profile")

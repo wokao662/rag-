@@ -1,3 +1,8 @@
+package com.example.rag.cli;
+
+import com.example.rag.AppConfig;
+import com.example.rag.recommendation.EmbeddingClient;
+import com.example.rag.recommendation.QdrantClient;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 
@@ -91,7 +96,7 @@ public final class StrategyIndexer {
         return point;
     }
 
-    static String qdrantUrl() {
+    public static String qdrantUrl() {
         return AppConfig.getOrDefault("QDRANT_URL", "http://127.0.0.1:6333");
     }
 }

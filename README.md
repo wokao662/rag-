@@ -96,7 +96,7 @@ docker compose up -d
 
 ```powershell
 python .\generate_strategy_chunks.py --strict
-mvn compile exec:java "-Dexec.mainClass=StrategyIndexer"
+mvn compile exec:java "-Dexec.mainClass=com.example.rag.cli.StrategyIndexer"
 ```
 
 程序会创建 `learning_strategies` Collection，并把 `data/chunks/*.jsonl` 全部写入。
@@ -105,13 +105,13 @@ mvn compile exec:java "-Dexec.mainClass=StrategyIndexer"
 执行一次检索：
 
 ```powershell
-mvn compile exec:java "-Dexec.mainClass=StrategySearcher" "-Dexec.args=我总是考试前突击，学完很快忘记，应该怎么办"
+mvn compile exec:java "-Dexec.mainClass=com.example.rag.cli.StrategySearcher" "-Dexec.args=我总是考试前突击，学完很快忘记，应该怎么办"
 ```
 
 测试完整的 RAG 推荐链路（检索后再调用聊天模型，返回 JSON）：
 
 ```powershell
-mvn compile exec:java "-Dexec.mainClass=RagRecommendationTest" "-Dexec.args=我背单词很快忘，而且每天只能学习30分钟"
+mvn compile exec:java "-Dexec.mainClass=com.example.rag.cli.RagRecommendationTest" "-Dexec.args=我背单词很快忘，而且每天只能学习30分钟"
 ```
 
 这是命令行测试版：单轮调用、不保存用户画像和历史对话。Prompt 已包含知识来源限定、稳定 chunkId 引用、信息不足澄清、无匹配兜底和基础注入防护。
@@ -271,3 +271,19 @@ Invoke-RestMethod http://127.0.0.1:8080/api/v1/users/web-user-001/profile
 ```
 
 当前 URL 中的 `externalId` 只是开发阶段用于串联数据的稳定标识，不是登录凭证。正式对外部署前必须接入认证，由服务端从已验证的 Token 中取得用户身份，不能信任前端任意传入的用户 ID。
+
+### 推荐 API（开发版）
+
+对话中画像充足（`ready=true`）时会自动触发一次推荐：系统把画像整理成检索文本，经 Embedding 向量化后在 Qdrant 召回候选策略 chunk，再由聊天模型生成结构化推荐。推荐结果作为 assistant 消息（`messageType=recommendation`）存入会话，同时包含在消息接口的响应中。
+
+也可以对已有画像主动获取或刷新推荐：
+
+```powershell
+Invoke-RestMethod `
+  -Method Post `
+  -Uri http://127.0.0.1:8080/api/v1/users/web-user-001/recommendations
+```
+
+返回固定 JSON：`status`（`answer`、`clarify`、`no_match`）、给用户看的 `answer`、检索条件 `queryText`、识别到的 `userConstraints`、最多三条 `recommendations`（含方法步骤、理由、来源和 chunkId 引用）以及 `followUpQuestions`。模型输出会经过 Java 校验：状态与内容必须一致，引用必须指向真实检索到的 chunk，校验失败返回 502。
+
+用户还没有画像时调用推荐接口返回 404；Qdrant、Embedding 或聊天模型不可用时返回 502，画像对话流程不受影响。
