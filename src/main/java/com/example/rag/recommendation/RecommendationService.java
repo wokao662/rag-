@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -44,7 +45,8 @@ public class RecommendationService {
         try {
             ensureCollection();
             List<Float> queryVector = embeddingClient.embedQuery(queryText);
-            knowledge = buildKnowledge(qdrantClient.search(queryVector, RETRIEVAL_LIMIT));
+            JsonArray hits = qdrantClient.search(queryVector, RETRIEVAL_LIMIT);
+            knowledge = mergeKnowledge(buildKnowledge(hits), expandByStrategy(hits));
         } catch (IOException error) {
             throw new RecommendationUnavailableException("策略检索服务暂时不可用", error);
         }
@@ -77,22 +79,51 @@ public class RecommendationService {
         }
     }
 
+    /** 把召回命中策略的全部 chunk 拉回，避免模型只看到定义片段而缺少实施步骤。 */
+    private JsonArray expandByStrategy(JsonArray hits) throws IOException {
+        List<String> strategyIds = new ArrayList<>();
+        for (JsonElement element : hits) {
+            String strategyId = element.getAsJsonObject().getAsJsonObject("payload")
+                    .get("strategyId").getAsString();
+            if (!strategyIds.contains(strategyId)) strategyIds.add(strategyId);
+        }
+        return strategyIds.isEmpty() ? new JsonArray() : qdrantClient.findByStrategyIds(strategyIds);
+    }
+
+    /** 合并补齐的 chunk：已召回的保留相似度分数，补齐的不重复、不带分数。 */
+    static JsonArray mergeKnowledge(JsonArray knowledge, JsonArray expandedPoints) {
+        Set<String> existing = candidateChunkIds(knowledge);
+        for (JsonElement element : expandedPoints) {
+            JsonObject point = element.getAsJsonObject();
+            String chunkId = point.get("id").getAsString();
+            if (existing.add(chunkId)) {
+                knowledge.add(toKnowledgeItem(point, false));
+            }
+        }
+        return knowledge;
+    }
+
     private static JsonArray buildKnowledge(JsonArray hits) {
         JsonArray knowledge = new JsonArray();
         for (JsonElement element : hits) {
-            JsonObject hit = element.getAsJsonObject();
-            JsonObject payload = hit.getAsJsonObject("payload");
-            JsonObject item = new JsonObject();
-            item.addProperty("chunkId", hit.get("id").getAsString());
-            item.addProperty("retrievalScore", hit.get("score").getAsDouble());
-            item.addProperty("strategyId", payload.get("strategyId").getAsString());
-            item.addProperty("strategyName", payload.get("strategyName").getAsString());
-            item.addProperty("chunkType", payload.get("chunkType").getAsString());
-            item.addProperty("content", sanitize(payload.get("text").getAsString()));
-            item.add("sourceIds", payload.get("sourceIds").deepCopy());
-            knowledge.add(item);
+            knowledge.add(toKnowledgeItem(element.getAsJsonObject(), true));
         }
         return knowledge;
+    }
+
+    private static JsonObject toKnowledgeItem(JsonObject hit, boolean includeScore) {
+        JsonObject payload = hit.getAsJsonObject("payload");
+        JsonObject item = new JsonObject();
+        item.addProperty("chunkId", hit.get("id").getAsString());
+        if (includeScore) {
+            item.addProperty("retrievalScore", hit.get("score").getAsDouble());
+        }
+        item.addProperty("strategyId", payload.get("strategyId").getAsString());
+        item.addProperty("strategyName", payload.get("strategyName").getAsString());
+        item.addProperty("chunkType", payload.get("chunkType").getAsString());
+        item.addProperty("content", sanitize(payload.get("text").getAsString()));
+        item.add("sourceIds", payload.get("sourceIds").deepCopy());
+        return item;
     }
 
     private static String sanitize(String text) {
