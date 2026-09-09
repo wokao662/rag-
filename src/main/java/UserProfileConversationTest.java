@@ -1,6 +1,16 @@
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
+import com.example.rag.profile.ConversationRepository;
+import com.example.rag.profile.ConversationalProfileAgent;
+import com.example.rag.profile.MessageRepository;
+import com.example.rag.profile.ProfileDecisionValidator;
+import com.example.rag.profile.ProfileReadinessPolicy;
+import com.example.rag.profile.UserProfileExtractor;
+import com.example.rag.profile.UserProfileMerger;
+import com.example.rag.profile.UserProfileRepository;
+import com.example.rag.profile.UserProfileValidator;
+import com.example.rag.profile.UserRepository;
 
 import java.nio.charset.Charset;
 import java.sql.Connection;
