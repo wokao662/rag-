@@ -3,37 +3,36 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>学习策略推荐</title>
+    <title>学习策略助手</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header>
-    <h1>学习策略推荐</h1>
-    <div class="user-bar">
-        <label for="externalId">用户标识</label>
-        <input id="externalId" type="text" maxlength="128" placeholder="例如 web-user-001">
-        <button id="loadUser">加载</button>
-        <button id="newConversation" disabled>新会话</button>
+    <button id="toggleSidebar" class="icon-btn" title="历史会话" aria-label="历史会话">☰</button>
+    <h1>学习策略助手</h1>
+    <div class="header-actions">
+        <button id="newConversation" class="ghost-btn">新会话</button>
+        <button id="toggleProfile" class="ghost-btn" title="查看我的画像">我的画像</button>
     </div>
 </header>
-<main>
+<div id="layout">
     <aside id="sidebar">
         <h2>历史会话</h2>
         <ul id="conversationList"></ul>
     </aside>
-    <section id="chat">
+    <main id="chat">
         <div id="messages"></div>
         <form id="composer">
-            <textarea id="input" rows="2" placeholder="描述你的学习目标、困难和时间约束……" disabled></textarea>
-            <button type="submit" id="send" disabled>发送</button>
+            <textarea id="input" rows="1" placeholder="说说你最近在学什么、遇到了什么困难……"></textarea>
+            <button type="submit" id="send">发送</button>
         </form>
         <div id="status"></div>
-    </section>
-    <aside id="panel">
-        <h2>当前画像</h2>
-        <dl id="profile"></dl>
+    </main>
+    <aside id="profilePanel">
+        <h2>我目前了解到的你</h2>
+        <div id="profile"></div>
     </aside>
-</main>
+</div>
 <script src="app.js"></script>
 </body>
 </html>
