@@ -316,6 +316,14 @@ Invoke-RestMethod `
 
 `action` 只能是 `adopted` 或 `dismissed`；消息必须属于该用户的会话，否则返回 404。推荐消息 ID 来自消息接口响应的 `assistantMessageId`，或消息历史接口的 `messageId`。
 
+### 模型调用日志
+
+每次大模型调用（画像抽取 `extract`、画像决策 `decide`、推荐生成 `recommend`）都会写入 `model_call_logs` 表：任务类型、模型版本、输入输出快照、耗时、`status`（`success` / `fallback` 走了本地兜底 / `failed`）和失败原因。日志写入失败不影响主流程。用于定位延迟瓶颈、评估推荐质量，以及为后续自研模型积累评测数据：
+
+```powershell
+docker exec rag-postgres psql -U learning_app -d learning_app -c "SELECT task_type, status, latency_ms, created_at FROM model_call_logs ORDER BY created_at DESC LIMIT 10;"
+```
+
 页面依赖的会话查询接口：
 
 - `GET /api/v1/users/{externalId}/conversations`：列出该用户的会话（按最近更新排序，最多 100 条），`title` 为该会话首条用户消息的摘要。
