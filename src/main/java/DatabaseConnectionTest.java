@@ -1,4 +1,8 @@
 import com.google.gson.JsonObject;
+import com.example.rag.profile.ConversationRepository;
+import com.example.rag.profile.MessageRepository;
+import com.example.rag.profile.UserProfileRepository;
+import com.example.rag.profile.UserRepository;
 
 import java.sql.Connection;
 import java.sql.ResultSet;

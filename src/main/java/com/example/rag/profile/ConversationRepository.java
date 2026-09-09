@@ -1,3 +1,5 @@
+package com.example.rag.profile;
+
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -26,6 +28,17 @@ public final class ConversationRepository {
             statement.setObject(2, conversationId);
             if (statement.executeUpdate() != 1) {
                 throw new SQLException("找不到会话：" + conversationId);
+            }
+        }
+    }
+
+    public boolean belongsToUser(Connection connection, UUID conversationId, UUID userId) throws SQLException {
+        String sql = "SELECT EXISTS (SELECT 1 FROM conversations WHERE id = ? AND user_id = ?)";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setObject(1, conversationId);
+            statement.setObject(2, userId);
+            try (ResultSet result = statement.executeQuery()) {
+                return result.next() && result.getBoolean(1);
             }
         }
     }
