@@ -1,5 +1,6 @@
 package com.example.rag.api;
 
+import com.example.rag.auth.AccessCodeService;
 import com.example.rag.profile.UserProfileService;
 import com.example.rag.recommendation.FeedbackService;
 import com.example.rag.recommendation.RecommendationService;
@@ -13,6 +14,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.util.List;
 import java.util.UUID;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -30,6 +32,14 @@ class UserProfileControllerTest {
 
     @MockitoBean
     private FeedbackService feedbackService;
+
+    @MockitoBean
+    private AccessCodeService accessCodes;
+
+    @org.junit.jupiter.api.BeforeEach
+    void allowAllAccessCodes() {
+        when(accessCodes.isAllowed(any(), any())).thenReturn(true);
+    }
 
     @Test
     void createsConversation() throws Exception {
@@ -137,6 +147,14 @@ class UserProfileControllerTest {
                         .contentType("application/json")
                         .content("{\"strategyId\":\"strategy-keyword-mnemonic\",\"action\":\"love\"}"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void rejectsRequestWhenCodeNotAllowed() throws Exception {
+        when(accessCodes.isAllowed(any(), any())).thenReturn(false);
+
+        mockMvc.perform(post("/api/v1/users/web-user-001/conversations"))
+                .andExpect(status().isUnauthorized());
     }
 
     @Test

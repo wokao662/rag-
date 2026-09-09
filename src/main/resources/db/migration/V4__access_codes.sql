@@ -1,0 +1,7 @@
+CREATE TABLE IF NOT EXISTS access_codes (
+    code VARCHAR(64) PRIMARY KEY,
+    label VARCHAR(128),
+    revoked BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_used_at TIMESTAMPTZ
+);

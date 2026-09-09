@@ -460,3 +460,40 @@ header h1 {
     font-size: 13px;
     line-height: 1.7;
 }
+
+.access-gate {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    align-items: center;
+}
+
+.access-gate input {
+    padding: 10px 14px;
+    border: 1px solid #e5e6eb;
+    border-radius: 10px;
+    font-size: 14px;
+    width: 240px;
+    outline: none;
+}
+
+.access-gate input:focus {
+    border-color: #1d4ed8;
+}
+
+.access-gate button {
+    border: none;
+    background: #1d4ed8;
+    color: #fff;
+    padding: 10px 20px;
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.access-gate-error {
+    position: absolute;
+    margin-top: 56px;
+    color: #b91c1c;
+    font-size: 13px;
+}

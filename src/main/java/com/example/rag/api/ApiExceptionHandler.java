@@ -1,5 +1,6 @@
 package com.example.rag.api;
 
+import com.example.rag.auth.AccessCodeService;
 import com.example.rag.profile.UserProfileService;
 import com.example.rag.recommendation.FeedbackService;
 import com.example.rag.recommendation.RecommendationService;
@@ -21,6 +22,11 @@ public class ApiExceptionHandler {
             MethodArgumentNotValidException.class})
     ResponseEntity<ProblemDetail> badRequest(Exception error, HttpServletRequest request) {
         return problem(HttpStatus.BAD_REQUEST, "请求参数不合法", safeMessage(error), request);
+    }
+
+    @ExceptionHandler(AccessCodeService.UnauthorizedException.class)
+    ResponseEntity<ProblemDetail> unauthorized(RuntimeException error, HttpServletRequest request) {
+        return problem(HttpStatus.UNAUTHORIZED, "未授权", error.getMessage(), request);
     }
 
     @ExceptionHandler({UserProfileService.ProfileNotFoundException.class,

@@ -20,6 +20,7 @@ const EXAMPLE_QUESTIONS = [
     "专业概念看不懂，看完教材也不知道在讲什么"
 ];
 
+let accessCode = localStorage.getItem("accessCode") || "";
 let externalId = localStorage.getItem("externalId");
 if (!externalId) {
     externalId = "web-" + crypto.randomUUID().slice(0, 8);
@@ -48,11 +49,20 @@ function apiUrl(path) {
 }
 
 async function http(method, path, body) {
+    const headers = {};
+    if (body) headers["Content-Type"] = "application/json; charset=utf-8";
+    if (accessCode) headers["X-Access-Code"] = accessCode;
     const response = await fetch(apiUrl(path), {
         method,
-        headers: body ? { "Content-Type": "application/json; charset=utf-8" } : undefined,
+        headers,
         body: body ? JSON.stringify(body) : undefined
     });
+    if (response.status === 401) {
+        localStorage.removeItem("accessCode");
+        accessCode = "";
+        showAccessGate();
+        throw new Error("需要有效的访问码");
+    }
     if (!response.ok) {
         let detail = "操作没有成功，请稍后再试";
         try {
@@ -337,6 +347,66 @@ function renderProfile(profile) {
 
         elements.profile.appendChild(item);
     });
+}
+
+function showAccessGate() {
+    elements.messages.innerHTML = "";
+    const gate = document.createElement("div");
+    gate.id = "welcome";
+
+    const title = document.createElement("h2");
+    title.textContent = "请输入访问码";
+    const hint = document.createElement("p");
+    hint.textContent = "当前是内测版本，需要测试访问码才能使用。";
+    gate.appendChild(title);
+    gate.appendChild(hint);
+
+    const form = document.createElement("form");
+    form.className = "access-gate";
+    const input = document.createElement("input");
+    input.placeholder = "访问码";
+    input.maxLength = 64;
+    input.autocomplete = "off";
+    const submit = document.createElement("button");
+    submit.type = "submit";
+    submit.textContent = "进入";
+    const error = document.createElement("p");
+    error.className = "access-gate-error";
+    form.appendChild(input);
+    form.appendChild(submit);
+    form.appendChild(error);
+    gate.appendChild(form);
+
+    form.addEventListener("submit", async event => {
+        event.preventDefault();
+        const code = input.value.trim();
+        if (!code) return;
+        error.textContent = "";
+        submit.disabled = true;
+        try {
+            const response = await fetch("/api/v1/auth/redeem", {
+                method: "POST",
+                headers: { "Content-Type": "application/json; charset=utf-8" },
+                body: JSON.stringify({ code })
+            });
+            if (!response.ok) throw new Error("访问码无效或已被停用");
+            const result = await response.json();
+            accessCode = code;
+            localStorage.setItem("accessCode", accessCode);
+            externalId = result.externalId;
+            localStorage.setItem("externalId", externalId);
+            showWelcome();
+            loadConversations();
+            loadProfile();
+        } catch (failure) {
+            error.textContent = failure.message;
+        } finally {
+            submit.disabled = false;
+        }
+    });
+
+    elements.messages.appendChild(gate);
+    input.focus();
 }
 
 function showWelcome() {
