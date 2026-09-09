@@ -274,7 +274,7 @@ Invoke-RestMethod http://127.0.0.1:8080/api/v1/users/web-user-001/profile
 
 ### 推荐 API（开发版）
 
-对话中画像充足（`ready=true`）时会自动触发一次推荐：系统把画像整理成检索文本，经 Embedding 向量化后在 Qdrant 召回候选策略 chunk，再由聊天模型生成结构化推荐。推荐结果作为 assistant 消息（`messageType=recommendation`）存入会话，同时包含在消息接口的响应中。
+对话中画像充足（`ready=true`）时会自动触发一次推荐：系统把画像整理成检索文本，经 Embedding 向量化后在 Qdrant 召回候选策略 chunk，并按策略补齐该策略的全部 chunk（定义、实施步骤、适用条件等），再由聊天模型基于完整资料生成结构化推荐。推荐结果作为 assistant 消息（`messageType=recommendation`）存入会话，同时包含在消息接口的响应中。
 
 也可以对已有画像主动获取或刷新推荐：
 
