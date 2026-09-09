@@ -1,3 +1,5 @@
+import com.example.rag.AppConfig;
+
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
