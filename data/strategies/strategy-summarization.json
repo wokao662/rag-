@@ -1,0 +1,53 @@
+{
+  "strategyId": "strategy-summarization",
+  "name": "总结",
+  "aliases": [
+    "概括",
+    "summarization"
+  ],
+  "summary": "用自己的话概括学习材料的主要内容和关键信息，将重要内容整合为简洁的概述。",
+  "steps": [
+    "完整阅读学习材料",
+    "识别材料中的关键信息和主要观点",
+    "用自己的话组织成简洁的总结",
+    "检查总结是否覆盖了重要内容",
+    "根据需要进行修改和完善"
+  ],
+  "suitableFor": [
+    {
+      "label": "有一定写作能力的高年级学生",
+      "reason": "总结能力与写作技能和话题兴趣相关，高年级学生更能从总结训练中获益。",
+      "sourceIds": [
+        "source-006"
+      ]
+    }
+  ],
+  "notSuitableFor": [
+    {
+      "label": "写作能力不足的学习者",
+      "reason": "写作技能和话题兴趣影响总结效果，低写作能力的学生总结效果较差。",
+      "sourceIds": [
+        "source-006"
+      ]
+    },
+    {
+      "label": "需要细节记忆的学习任务",
+      "reason": "总结关注整体大意，可能导致对细节信息的错误记忆或遗漏。",
+      "sourceIds": [
+        "source-006"
+      ]
+    }
+  ],
+  "sourceIds": [
+    "source-006"
+  ],
+  "recommendation": {
+    "evidenceScore": 0.3,
+    "communityScore": 0.5,
+    "effectivenessScore": 0.3,
+    "overallScore": 0.37,
+    "triedCount": 0,
+    "helpfulCount": 0
+  },
+  "reviewStatus": "draft"
+}

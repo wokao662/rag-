@@ -1,0 +1,113 @@
+package com.example.rag.api;
+
+import com.example.rag.profile.UserProfileService;
+import com.example.rag.recommendation.FeedbackService;
+import com.example.rag.recommendation.RecommendationService;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
+import org.springframework.http.HttpStatus;
+import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
+import java.util.UUID;
+
+@Validated
+@RestController
+@RequestMapping("/api/v1/users/{externalId}")
+public class UserProfileController {
+    private final UserProfileService profileService;
+    private final FeedbackService feedbackService;
+
+    public UserProfileController(UserProfileService profileService, FeedbackService feedbackService) {
+        this.profileService = profileService;
+        this.feedbackService = feedbackService;
+    }
+
+    @GetMapping("/conversations")
+    public List<UserProfileService.ConversationSummary> listConversations(
+            @PathVariable @NotBlank @Size(max = 128)
+            @Pattern(regexp = "[A-Za-z0-9._-]+") String externalId
+    ) {
+        return profileService.listConversations(externalId);
+    }
+
+    @PostMapping("/conversations")
+    @ResponseStatus(HttpStatus.CREATED)
+    public UserProfileService.ConversationStarted startConversation(
+            @PathVariable @NotBlank @Size(max = 128)
+            @Pattern(regexp = "[A-Za-z0-9._-]+") String externalId
+    ) {
+        return profileService.startConversation(externalId);
+    }
+
+    @PostMapping("/conversations/{conversationId}/messages")
+    public UserProfileService.TurnResult sendMessage(
+            @PathVariable @NotBlank @Size(max = 128)
+            @Pattern(regexp = "[A-Za-z0-9._-]+") String externalId,
+            @PathVariable UUID conversationId,
+            @Valid @RequestBody SendMessageRequest request
+    ) {
+        return profileService.processMessage(externalId, conversationId, request.content());
+    }
+
+    @GetMapping("/conversations/{conversationId}/messages")
+    public List<UserProfileService.MessageView> getMessages(
+            @PathVariable @NotBlank @Size(max = 128)
+            @Pattern(regexp = "[A-Za-z0-9._-]+") String externalId,
+            @PathVariable UUID conversationId
+    ) {
+        return profileService.getMessages(externalId, conversationId);
+    }
+
+    @PostMapping("/messages/{messageId}/feedback")
+    public FeedbackService.FeedbackResult sendFeedback(
+            @PathVariable @NotBlank @Size(max = 128)
+            @Pattern(regexp = "[A-Za-z0-9._-]+") String externalId,
+            @PathVariable UUID messageId,
+            @Valid @RequestBody SendFeedbackRequest request
+    ) {
+        return feedbackService.record(externalId, messageId, request.strategyId(), request.action());
+    }
+
+    @PostMapping("/recommendations")
+    public RecommendationService.RecommendationResult recommend(
+            @PathVariable @NotBlank @Size(max = 128)
+            @Pattern(regexp = "[A-Za-z0-9._-]+") String externalId
+    ) {
+        return profileService.recommend(externalId);
+    }
+
+    @GetMapping("/profile")
+    public UserProfileService.ProfileResult getProfile(
+            @PathVariable @NotBlank @Size(max = 128)
+            @Pattern(regexp = "[A-Za-z0-9._-]+") String externalId
+    ) {
+        return profileService.getProfile(externalId);
+    }
+
+    public record SendFeedbackRequest(
+            @NotBlank(message = "strategyId 不能为空")
+            @Size(max = 128, message = "strategyId 不能超过 128 个字符")
+            String strategyId,
+            @NotBlank(message = "action 不能为空")
+            @Pattern(regexp = "adopted|dismissed", message = "action 只能是 adopted 或 dismissed")
+            String action
+    ) {
+    }
+
+    public record SendMessageRequest(
+            @NotBlank(message = "content 不能为空")
+            @Size(max = 10_000, message = "content 不能超过 10000 个字符")
+            String content
+    ) {
+    }
+}

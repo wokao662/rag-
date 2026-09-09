@@ -1,3 +1,4 @@
+import com.example.rag.AppConfig;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -14,10 +15,8 @@ public class LLMTest {
 
     // SiliconFlow API 地址
     private static final String API_URL = "https://api.siliconflow.cn/v1/chat/completions";
-    // 替换成你自己的 API Key
-    private static final String API_KEY = "sk-tqsingvftvwmkvxkofryxhpaknmlqzdwwdzxvxrbymjrnzds";
-
     public static void main(String[] args) throws IOException {
+        String apiKey = AppConfig.require("SILICONFLOW_API_KEY");
         // 1. 构建请求体 JSON
         JsonObject requestBody = new JsonObject();
         requestBody.addProperty("model", "Qwen/Qwen3-32B");
@@ -51,7 +50,7 @@ public class LLMTest {
         // 3. 构建 HTTP 请求
         Request request = new Request.Builder()
                 .url(API_URL)
-                .addHeader("Authorization", "Bearer " + API_KEY)
+                .addHeader("Authorization", "Bearer " + apiKey)
                 .addHeader("Content-Type", "application/json")
                 .post(RequestBody.create(
                         requestBody.toString(),
