@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -47,6 +48,36 @@ class UserProfileControllerTest {
                         .content("{\"content\":\"   \"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.title").value("请求参数不合法"));
+    }
+
+    @Test
+    void listsConversations() throws Exception {
+        UUID conversationId = UUID.randomUUID();
+        when(profileService.listConversations("web-user-001"))
+                .thenReturn(List.of(new UserProfileService.ConversationSummary(
+                        conversationId, "active", "2026-09-09T10:00:00Z", "2026-09-09T11:00:00Z")));
+
+        mockMvc.perform(get("/api/v1/users/web-user-001/conversations"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].conversationId").value(conversationId.toString()))
+                .andExpect(jsonPath("$[0].status").value("active"));
+    }
+
+    @Test
+    void returnsConversationMessages() throws Exception {
+        UUID conversationId = UUID.randomUUID();
+        when(profileService.getMessages("web-user-001", conversationId))
+                .thenReturn(List.of(
+                        new UserProfileService.MessageView(UUID.randomUUID(), "user",
+                                "我背单词很快忘", java.util.Map.of(), "2026-09-09T10:00:00Z"),
+                        new UserProfileService.MessageView(UUID.randomUUID(), "assistant",
+                                "你每天大约有多少学习时间？", java.util.Map.of("messageType", "profile_question"),
+                                "2026-09-09T10:00:05Z")));
+
+        mockMvc.perform(get("/api/v1/users/web-user-001/conversations/{id}/messages", conversationId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].role").value("user"))
+                .andExpect(jsonPath("$[1].metadata.messageType").value("profile_question"));
     }
 
     @Test

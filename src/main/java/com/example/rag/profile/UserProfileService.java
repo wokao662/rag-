@@ -147,6 +147,31 @@ public class UserProfileService {
         });
     }
 
+    public List<ConversationSummary> listConversations(String externalId) {
+        String normalizedId = normalizeExternalId(externalId);
+        return inTransaction(connection -> {
+            UUID userId = requireUser(connection, normalizedId);
+            return conversations.findByUserId(connection, userId, 100).stream()
+                    .map(conversation -> new ConversationSummary(
+                            conversation.id(), conversation.status(),
+                            conversation.createdAt().toString(), conversation.updatedAt().toString()))
+                    .toList();
+        });
+    }
+
+    public List<MessageView> getMessages(String externalId, UUID conversationId) {
+        String normalizedId = normalizeExternalId(externalId);
+        return inTransaction(connection -> {
+            UUID userId = requireUser(connection, normalizedId);
+            requireConversationOwnership(connection, conversationId, userId);
+            return messages.findRecent(connection, conversationId, 100).stream()
+                    .map(message -> new MessageView(
+                            message.id(), message.role(), message.content(),
+                            toMap(message.metadata()), message.createdAt().toString()))
+                    .toList();
+        });
+    }
+
     public RecommendationService.RecommendationResult recommend(String externalId) {
         String normalizedId = normalizeExternalId(externalId);
         JsonObject profile = inTransaction(connection -> {
@@ -232,6 +257,23 @@ public class UserProfileService {
     }
 
     public record ConversationStarted(UUID userId, UUID conversationId) {
+    }
+
+    public record ConversationSummary(
+            UUID conversationId,
+            String status,
+            String createdAt,
+            String updatedAt
+    ) {
+    }
+
+    public record MessageView(
+            UUID messageId,
+            String role,
+            String content,
+            Map<String, Object> metadata,
+            String createdAt
+    ) {
     }
 
     public record TurnResult(

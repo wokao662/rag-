@@ -287,3 +287,23 @@ Invoke-RestMethod `
 返回固定 JSON：`status`（`answer`、`clarify`、`no_match`）、给用户看的 `answer`、检索条件 `queryText`、识别到的 `userConstraints`、最多三条 `recommendations`（含方法步骤、理由、来源和 chunkId 引用）以及 `followUpQuestions`。模型输出会经过 Java 校验：状态与内容必须一致，引用必须指向真实检索到的 chunk，校验失败返回 502。
 
 用户还没有画像时调用推荐接口返回 404；Qdrant、Embedding 或聊天模型不可用时返回 502，画像对话流程不受影响。
+
+### Web 聊天界面（开发版）
+
+启动后端后直接在浏览器打开：
+
+```
+http://127.0.0.1:8080/
+```
+
+页面由 Spring Boot 直接托管（`src/main/resources/static`），无需额外构建。功能：
+
+- 输入用户标识后加载该用户的画像和历史会话；点“新会话”开始一轮对话。
+- 聊天窗口发送消息后，画像不足时显示助手的追问，画像充足时自动展示推荐卡片（策略名称、具体步骤、推荐理由、注意事项、来源和 chunkId 引用）。
+- 右侧实时展示当前画像及每个字段的原文依据。
+- 左侧列出历史会话，点击可回看完整消息记录。
+
+页面依赖的会话查询接口：
+
+- `GET /api/v1/users/{externalId}/conversations`：列出该用户的会话（按最近更新排序，最多 100 条）。
+- `GET /api/v1/users/{externalId}/conversations/{conversationId}/messages`：读取会话的完整消息（含推荐结果的 metadata）。

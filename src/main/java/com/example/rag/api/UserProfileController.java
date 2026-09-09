@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
 import java.util.UUID;
 
 @Validated
@@ -26,6 +27,14 @@ public class UserProfileController {
 
     public UserProfileController(UserProfileService profileService) {
         this.profileService = profileService;
+    }
+
+    @GetMapping("/conversations")
+    public List<UserProfileService.ConversationSummary> listConversations(
+            @PathVariable @NotBlank @Size(max = 128)
+            @Pattern(regexp = "[A-Za-z0-9._-]+") String externalId
+    ) {
+        return profileService.listConversations(externalId);
     }
 
     @PostMapping("/conversations")
@@ -45,6 +54,15 @@ public class UserProfileController {
             @Valid @RequestBody SendMessageRequest request
     ) {
         return profileService.processMessage(externalId, conversationId, request.content());
+    }
+
+    @GetMapping("/conversations/{conversationId}/messages")
+    public List<UserProfileService.MessageView> getMessages(
+            @PathVariable @NotBlank @Size(max = 128)
+            @Pattern(regexp = "[A-Za-z0-9._-]+") String externalId,
+            @PathVariable UUID conversationId
+    ) {
+        return profileService.getMessages(externalId, conversationId);
     }
 
     @PostMapping("/recommendations")
