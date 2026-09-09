@@ -301,8 +301,20 @@ http://127.0.0.1:8080/
 - 首次打开自动生成本地用户标识，无需手动输入；接入正式认证后无缝替换。
 - 未开始对话时显示欢迎页和示例问题，点击示例即可直接发送。
 - 聊天窗口发送消息后，画像不足时显示助手的追问（带“正在输入”状态），画像充足时自动展示推荐卡片（策略名称、具体步骤、推荐理由、注意事项和来源）。
-- 右上角“我的画像”抽屉展示当前画像，每个字段附用户原话引用。
+- 右上角“我的画像”抽屉展示当前画像，每个字段附用户原话引用（画像只能由系统根据对话更新，不提供手动编辑）。
 - 左上角可展开历史会话抽屉，会话以首条消息摘要为标题，点击可回看完整消息记录。
+- 推荐卡片中的每个策略带“采纳 / 不感兴趣”反馈按钮，点击后写入 `recommendation_feedback` 表，同一推荐同一策略只保留最新一次反馈。反馈接口：
+
+```powershell
+$body = @{ strategyId = "strategy-keyword-mnemonic"; action = "adopted" } | ConvertTo-Json
+Invoke-RestMethod `
+  -Method Post `
+  -ContentType "application/json; charset=utf-8" `
+  -Uri "http://127.0.0.1:8080/api/v1/users/web-user-001/messages/<推荐消息ID>/feedback" `
+  -Body $body
+```
+
+`action` 只能是 `adopted` 或 `dismissed`；消息必须属于该用户的会话，否则返回 404。推荐消息 ID 来自消息接口响应的 `assistantMessageId`，或消息历史接口的 `messageId`。
 
 页面依赖的会话查询接口：
 

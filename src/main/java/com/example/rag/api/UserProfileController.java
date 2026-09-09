@@ -1,6 +1,7 @@
 package com.example.rag.api;
 
 import com.example.rag.profile.UserProfileService;
+import com.example.rag.recommendation.FeedbackService;
 import com.example.rag.recommendation.RecommendationService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -24,9 +25,11 @@ import java.util.UUID;
 @RequestMapping("/api/v1/users/{externalId}")
 public class UserProfileController {
     private final UserProfileService profileService;
+    private final FeedbackService feedbackService;
 
-    public UserProfileController(UserProfileService profileService) {
+    public UserProfileController(UserProfileService profileService, FeedbackService feedbackService) {
         this.profileService = profileService;
+        this.feedbackService = feedbackService;
     }
 
     @GetMapping("/conversations")
@@ -65,6 +68,16 @@ public class UserProfileController {
         return profileService.getMessages(externalId, conversationId);
     }
 
+    @PostMapping("/messages/{messageId}/feedback")
+    public FeedbackService.FeedbackResult sendFeedback(
+            @PathVariable @NotBlank @Size(max = 128)
+            @Pattern(regexp = "[A-Za-z0-9._-]+") String externalId,
+            @PathVariable UUID messageId,
+            @Valid @RequestBody SendFeedbackRequest request
+    ) {
+        return feedbackService.record(externalId, messageId, request.strategyId(), request.action());
+    }
+
     @PostMapping("/recommendations")
     public RecommendationService.RecommendationResult recommend(
             @PathVariable @NotBlank @Size(max = 128)
@@ -79,6 +92,16 @@ public class UserProfileController {
             @Pattern(regexp = "[A-Za-z0-9._-]+") String externalId
     ) {
         return profileService.getProfile(externalId);
+    }
+
+    public record SendFeedbackRequest(
+            @NotBlank(message = "strategyId 不能为空")
+            @Size(max = 128, message = "strategyId 不能超过 128 个字符")
+            String strategyId,
+            @NotBlank(message = "action 不能为空")
+            @Pattern(regexp = "adopted|dismissed", message = "action 只能是 adopted 或 dismissed")
+            String action
+    ) {
     }
 
     public record SendMessageRequest(

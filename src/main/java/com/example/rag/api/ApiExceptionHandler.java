@@ -1,6 +1,7 @@
 package com.example.rag.api;
 
 import com.example.rag.profile.UserProfileService;
+import com.example.rag.recommendation.FeedbackService;
 import com.example.rag.recommendation.RecommendationService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
@@ -23,7 +24,8 @@ public class ApiExceptionHandler {
     }
 
     @ExceptionHandler({UserProfileService.ProfileNotFoundException.class,
-            UserProfileService.ConversationNotFoundException.class})
+            UserProfileService.ConversationNotFoundException.class,
+            FeedbackService.FeedbackNotFoundException.class})
     ResponseEntity<ProblemDetail> notFound(RuntimeException error, HttpServletRequest request) {
         return problem(HttpStatus.NOT_FOUND, "资源不存在", error.getMessage(), request);
     }
