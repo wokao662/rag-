@@ -55,11 +55,12 @@ class UserProfileControllerTest {
         UUID conversationId = UUID.randomUUID();
         when(profileService.listConversations("web-user-001"))
                 .thenReturn(List.of(new UserProfileService.ConversationSummary(
-                        conversationId, "active", "2026-09-09T10:00:00Z", "2026-09-09T11:00:00Z")));
+                        conversationId, "我背单词很快忘", "active", "2026-09-09T10:00:00Z", "2026-09-09T11:00:00Z")));
 
         mockMvc.perform(get("/api/v1/users/web-user-001/conversations"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].conversationId").value(conversationId.toString()))
+                .andExpect(jsonPath("$[0].title").value("我背单词很快忘"))
                 .andExpect(jsonPath("$[0].status").value("active"));
     }
 

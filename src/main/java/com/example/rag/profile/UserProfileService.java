@@ -153,7 +153,7 @@ public class UserProfileService {
             UUID userId = requireUser(connection, normalizedId);
             return conversations.findByUserId(connection, userId, 100).stream()
                     .map(conversation -> new ConversationSummary(
-                            conversation.id(), conversation.status(),
+                            conversation.id(), conversationTitle(conversation), conversation.status(),
                             conversation.createdAt().toString(), conversation.updatedAt().toString()))
                     .toList();
         });
@@ -181,6 +181,16 @@ public class UserProfileService {
                     .orElseThrow(() -> new ProfileNotFoundException("该用户还没有画像"));
         });
         return recommendationService.recommend(profile);
+    }
+
+    private static final int CONVERSATION_TITLE_LENGTH = 30;
+
+    private static String conversationTitle(ConversationRepository.StoredConversation conversation) {
+        String firstMessage = conversation.firstUserMessage();
+        if (firstMessage == null || firstMessage.isBlank()) return "新会话";
+        String title = firstMessage.trim().replaceAll("\\s+", " ");
+        return title.length() <= CONVERSATION_TITLE_LENGTH
+                ? title : title.substring(0, CONVERSATION_TITLE_LENGTH) + "…";
     }
 
     private ProfileDecisionValidator.Decision decideWithFallback(
@@ -261,6 +271,7 @@ public class UserProfileService {
 
     public record ConversationSummary(
             UUID conversationId,
+            String title,
             String status,
             String createdAt,
             String updatedAt

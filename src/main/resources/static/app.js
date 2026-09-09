@@ -2,18 +2,37 @@ const PROFILE_LABELS = {
     learningGoal: "学习目标",
     learningContent: "学习内容",
     mainDifficulty: "主要困难",
-    availableMinutesPerDay: "每天可用分钟",
-    daysUntilDeadline: "距截止天数",
-    preferredLearningStyle: "偏好学习方式",
-    triedMethods: "已尝试方法"
+    availableMinutesPerDay: "每天可用时间",
+    daysUntilDeadline: "距截止日期",
+    preferredLearningStyle: "偏好方式",
+    triedMethods: "试过的方法"
 };
 
-let externalId = localStorage.getItem("externalId") || "";
+const PROFILE_UNITS = {
+    availableMinutesPerDay: " 分钟",
+    daysUntilDeadline: " 天"
+};
+
+const EXAMPLE_QUESTIONS = [
+    "我背单词很快忘，每天只能学习30分钟",
+    "还有一个月考试，书看过了但做题总是错",
+    "我学习时容易分心，很难连续专注一小时",
+    "专业概念看不懂，看完教材也不知道在讲什么"
+];
+
+let externalId = localStorage.getItem("externalId");
+if (!externalId) {
+    externalId = "web-" + crypto.randomUUID().slice(0, 8);
+    localStorage.setItem("externalId", externalId);
+}
 let conversationId = null;
+let sending = false;
 
 const elements = {
-    externalId: document.getElementById("externalId"),
-    loadUser: document.getElementById("loadUser"),
+    toggleSidebar: document.getElementById("toggleSidebar"),
+    toggleProfile: document.getElementById("toggleProfile"),
+    sidebar: document.getElementById("sidebar"),
+    profilePanel: document.getElementById("profilePanel"),
     newConversation: document.getElementById("newConversation"),
     conversationList: document.getElementById("conversationList"),
     messages: document.getElementById("messages"),
@@ -35,10 +54,10 @@ async function http(method, path, body) {
         body: body ? JSON.stringify(body) : undefined
     });
     if (!response.ok) {
-        let detail = `请求失败（HTTP ${response.status}）`;
+        let detail = "操作没有成功，请稍后再试";
         try {
             const problem = await response.json();
-            if (problem.detail) detail = `${problem.title || "请求失败"}：${problem.detail}`;
+            if (problem.detail) detail = problem.detail;
         } catch (ignored) {
             // 保留默认错误信息
         }
@@ -51,21 +70,19 @@ function showStatus(text) {
     elements.status.textContent = text || "";
 }
 
-function setReady(ready) {
-    elements.newConversation.disabled = !ready;
-    elements.input.disabled = !ready;
-    elements.send.disabled = !ready;
-}
-
 async function loadConversations() {
     try {
         const conversations = await http("GET", "/conversations");
         elements.conversationList.innerHTML = "";
         conversations.forEach(conversation => {
             const item = document.createElement("li");
-            item.textContent = conversation.conversationId.slice(0, 8) + " · " +
-                new Date(conversation.updatedAt).toLocaleString("zh-CN");
-            item.dataset.conversationId = conversation.conversationId;
+            const title = document.createElement("span");
+            title.textContent = conversation.title;
+            const time = document.createElement("span");
+            time.className = "time";
+            time.textContent = new Date(conversation.updatedAt).toLocaleString("zh-CN");
+            item.appendChild(title);
+            item.appendChild(time);
             if (conversation.conversationId === conversationId) item.classList.add("active");
             item.addEventListener("click", () => openConversation(conversation.conversationId));
             elements.conversationList.appendChild(item);
@@ -77,9 +94,9 @@ async function loadConversations() {
 
 async function openConversation(id) {
     conversationId = id;
-    elements.messages.innerHTML = "";
     try {
         const messages = await http("GET", `/conversations/${id}/messages`);
+        elements.messages.innerHTML = "";
         messages.forEach(renderMessage);
         scrollToBottom();
         loadConversations();
@@ -88,75 +105,123 @@ async function openConversation(id) {
     }
 }
 
-async function startConversation() {
-    try {
-        const started = await http("POST", "/conversations");
-        conversationId = started.conversationId;
-        elements.messages.innerHTML = "";
-        showStatus("");
-        loadConversations();
-    } catch (error) {
-        showStatus(error.message);
-    }
+function startConversation() {
+    conversationId = null;
+    showWelcome();
+    loadConversations();
+    elements.input.focus();
+}
+
+async function ensureConversation() {
+    if (conversationId) return;
+    const started = await http("POST", "/conversations");
+    conversationId = started.conversationId;
 }
 
 async function sendMessage(event) {
     event.preventDefault();
     const content = elements.input.value.trim();
-    if (!content) return;
-    if (!conversationId) await startConversation();
-    if (!conversationId) return;
-
-    renderMessage({ role: "user", content });
-    elements.input.value = "";
-    scrollToBottom();
+    if (!content || sending) return;
+    sending = true;
+    elements.send.disabled = true;
     showStatus("");
 
     try {
-        const turn = await http("POST", `/conversations/${conversationId}/messages`, { content });
-        if (turn.assistantMessage) {
-            renderMessage({ role: "assistant", content: turn.assistantMessage });
-        }
-        if (turn.recommendation) {
-            renderMessage({ role: "assistant", content: turn.recommendation.answer, recommendation: turn.recommendation });
-        }
+        await ensureConversation();
+        hideWelcome();
+        renderMessage({ role: "user", content });
+        elements.input.value = "";
+        autoResize();
+        const typing = renderTyping();
         scrollToBottom();
-        loadProfile();
+
+        try {
+            const turn = await http("POST", `/conversations/${conversationId}/messages`, { content });
+            typing.remove();
+            if (turn.assistantMessage) {
+                renderMessage({ role: "assistant", content: turn.assistantMessage });
+            }
+            if (turn.recommendation) {
+                renderMessage({
+                    role: "assistant",
+                    content: turn.recommendation.answer,
+                    recommendation: turn.recommendation
+                });
+            }
+            loadProfile();
+            loadConversations();
+        } finally {
+            typing.remove();
+        }
     } catch (error) {
         showStatus(error.message);
+    } finally {
+        sending = false;
+        elements.send.disabled = false;
+        scrollToBottom();
+        elements.input.focus();
     }
 }
 
 function renderMessage(message) {
+    const row = document.createElement("div");
+    row.className = `message-row ${message.role}`;
+
+    const avatar = document.createElement("div");
+    avatar.className = "avatar";
+    avatar.textContent = message.role === "user" ? "我" : "策";
+    row.appendChild(avatar);
+
+    const body = document.createElement("div");
+    body.className = "message-body";
     const bubble = document.createElement("div");
-    bubble.className = `message ${message.role}`;
+    bubble.className = "bubble";
     bubble.textContent = message.content;
+    body.appendChild(bubble);
+
     const recommendation = message.recommendation ||
-        (message.metadata && message.metadata.messageType === "recommendation" ? message.metadata.recommendation : null);
+        (message.metadata && message.metadata.messageType === "recommendation"
+            ? message.metadata.recommendation : null);
     if (recommendation) {
         bubble.appendChild(renderRecommendation(recommendation));
     }
-    elements.messages.appendChild(bubble);
+
+    row.appendChild(body);
+    elements.messages.appendChild(row);
+}
+
+function renderTyping() {
+    const row = document.createElement("div");
+    row.className = "message-row assistant typing";
+    row.innerHTML = '<div class="avatar">策</div><div class="message-body">' +
+        '<div class="bubble"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div></div>';
+    elements.messages.appendChild(row);
+    scrollToBottom();
+    return row;
 }
 
 function renderRecommendation(result) {
     const card = document.createElement("div");
     card.className = "recommendation-card";
 
-    const title = document.createElement("h3");
-    title.textContent = result.status === "answer" ? "推荐学习策略" :
-        result.status === "clarify" ? "还需要了解一些信息" : "暂时没有匹配的策略";
-    card.appendChild(title);
+    const cardTitle = document.createElement("div");
+    cardTitle.className = "card-title";
+    cardTitle.textContent = result.status === "answer" ? "为你推荐的学习策略" :
+        result.status === "clarify" ? "还想再了解一点" : "暂时没有匹配的策略";
+    card.appendChild(cardTitle);
 
     (result.recommendations || []).forEach(recommendation => {
+        const block = document.createElement("div");
+        block.className = "strategy";
+
         const name = document.createElement("h3");
         name.textContent = recommendation.strategyName;
-        card.appendChild(name);
+        block.appendChild(name);
 
         const reason = document.createElement("p");
         reason.className = "reason";
         reason.textContent = recommendation.reason;
-        card.appendChild(reason);
+        block.appendChild(reason);
 
         if (recommendation.methodSteps && recommendation.methodSteps.length > 0) {
             const steps = document.createElement("ol");
@@ -165,26 +230,28 @@ function renderRecommendation(result) {
                 item.textContent = step;
                 steps.appendChild(item);
             });
-            card.appendChild(steps);
+            block.appendChild(steps);
         }
 
         (recommendation.caveats || []).forEach(caveat => {
             const note = document.createElement("p");
             note.className = "caveats";
             note.textContent = "注意：" + caveat;
-            card.appendChild(note);
+            block.appendChild(note);
         });
 
         const meta = document.createElement("p");
         meta.className = "meta";
-        meta.textContent = "来源：" + (recommendation.sourceIds || []).join("、") +
-            "；引用：" + (recommendation.citations || []).join("、");
-        card.appendChild(meta);
+        meta.textContent = "来源 " + (recommendation.sourceIds || []).join("、");
+        block.appendChild(meta);
+
+        card.appendChild(block);
     });
 
     (result.followUpQuestions || []).forEach(question => {
         const followUp = document.createElement("p");
-        followUp.textContent = "追问：" + question;
+        followUp.className = "follow-up";
+        followUp.textContent = question;
         card.appendChild(followUp);
     });
 
@@ -204,53 +271,84 @@ function renderProfile(profile) {
     elements.profile.innerHTML = "";
     const fields = Object.keys(PROFILE_LABELS).filter(field => profile[field]);
     if (fields.length === 0) {
-        const empty = document.createElement("dt");
-        empty.className = "empty";
-        empty.textContent = "开始对话后这里会展示画像信息";
+        const empty = document.createElement("p");
+        empty.className = "profile-empty";
+        empty.textContent = "聊几句之后，我会把了解到的学习情况整理在这里。";
         elements.profile.appendChild(empty);
         return;
     }
     fields.forEach(field => {
-        const label = document.createElement("dt");
-        label.textContent = PROFILE_LABELS[field];
-        elements.profile.appendChild(label);
+        const item = document.createElement("div");
+        item.className = "profile-item";
 
-        const value = document.createElement("dd");
+        const label = document.createElement("div");
+        label.className = "label";
+        label.textContent = PROFILE_LABELS[field];
+        item.appendChild(label);
+
+        const value = document.createElement("div");
+        value.className = "value";
         const raw = profile[field].value;
-        value.textContent = Array.isArray(raw) ? raw.join("、") : String(raw);
-        elements.profile.appendChild(value);
+        const unit = PROFILE_UNITS[field] || "";
+        value.textContent = (Array.isArray(raw) ? raw.join("、") : String(raw)) + unit;
+        item.appendChild(value);
 
         if (profile[field].evidence) {
-            const evidence = document.createElement("dd");
-            evidence.className = "evidence";
-            evidence.textContent = "依据：" + profile[field].evidence;
-            elements.profile.appendChild(evidence);
+            const quote = document.createElement("div");
+            quote.className = "quote";
+            quote.textContent = "你说过：“" + profile[field].evidence + "”";
+            item.appendChild(quote);
         }
+
+        elements.profile.appendChild(item);
     });
+}
+
+function showWelcome() {
+    elements.messages.innerHTML = "";
+    const welcome = document.createElement("div");
+    welcome.id = "welcome";
+    welcome.innerHTML = "<h2>你好，我是学习策略助手</h2>" +
+        "<p>告诉我你在学什么、遇到了什么困难，我会从学习方法知识库里为你找合适的策略。</p>";
+    const examples = document.createElement("div");
+    examples.className = "examples";
+    EXAMPLE_QUESTIONS.forEach(question => {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.textContent = question;
+        chip.addEventListener("click", () => {
+            elements.input.value = question;
+            autoResize();
+            elements.composer.requestSubmit();
+        });
+        examples.appendChild(chip);
+    });
+    welcome.appendChild(examples);
+    elements.messages.appendChild(welcome);
+}
+
+function hideWelcome() {
+    const welcome = document.getElementById("welcome");
+    if (welcome) welcome.remove();
 }
 
 function scrollToBottom() {
     elements.messages.scrollTop = elements.messages.scrollHeight;
 }
 
-elements.loadUser.addEventListener("click", () => {
-    const id = elements.externalId.value.trim();
-    if (!id) {
-        showStatus("请先输入用户标识");
-        return;
-    }
-    externalId = id;
-    localStorage.setItem("externalId", externalId);
-    conversationId = null;
-    elements.messages.innerHTML = "";
-    setReady(true);
-    showStatus("");
-    loadConversations();
+function autoResize() {
+    elements.input.style.height = "auto";
+    elements.input.style.height = Math.min(elements.input.scrollHeight, 120) + "px";
+}
+
+elements.toggleSidebar.addEventListener("click", () => elements.sidebar.classList.toggle("hidden"));
+elements.toggleProfile.addEventListener("click", () => {
+    elements.profilePanel.classList.toggle("hidden");
     loadProfile();
 });
-
 elements.newConversation.addEventListener("click", startConversation);
 elements.composer.addEventListener("submit", sendMessage);
+elements.input.addEventListener("input", autoResize);
 elements.input.addEventListener("keydown", event => {
     if (event.key === "Enter" && !event.shiftKey) {
         event.preventDefault();
@@ -258,9 +356,11 @@ elements.input.addEventListener("keydown", event => {
     }
 });
 
-if (externalId) {
-    elements.externalId.value = externalId;
-    setReady(true);
-    loadConversations();
-    loadProfile();
+if (window.innerWidth < 900) {
+    elements.sidebar.classList.add("hidden");
+    elements.profilePanel.classList.add("hidden");
 }
+
+showWelcome();
+loadConversations();
+loadProfile();

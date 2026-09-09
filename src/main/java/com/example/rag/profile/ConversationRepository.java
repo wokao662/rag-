@@ -14,6 +14,7 @@ public final class ConversationRepository {
             UUID id,
             UUID userId,
             String status,
+            String firstUserMessage,
             OffsetDateTime createdAt,
             OffsetDateTime updatedAt
     ) {
@@ -50,10 +51,13 @@ public final class ConversationRepository {
             throw new IllegalArgumentException("会话读取数量必须在 1～100 之间");
         }
         String sql = """
-                SELECT id, user_id, status, created_at, updated_at
-                FROM conversations
-                WHERE user_id = ?
-                ORDER BY updated_at DESC
+                SELECT c.id, c.user_id, c.status, c.created_at, c.updated_at,
+                       (SELECT m.content FROM messages m
+                        WHERE m.conversation_id = c.id AND m.role = 'user'
+                        ORDER BY m.created_at LIMIT 1) AS first_user_message
+                FROM conversations c
+                WHERE c.user_id = ?
+                ORDER BY c.updated_at DESC
                 LIMIT ?
                 """;
         List<StoredConversation> conversations = new ArrayList<>();
@@ -66,6 +70,7 @@ public final class ConversationRepository {
                             result.getObject("id", UUID.class),
                             result.getObject("user_id", UUID.class),
                             result.getString("status"),
+                            result.getString("first_user_message"),
                             result.getObject("created_at", OffsetDateTime.class),
                             result.getObject("updated_at", OffsetDateTime.class)
                     ));
