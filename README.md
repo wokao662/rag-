@@ -328,6 +328,14 @@ docker exec rag-postgres psql -U learning_app -d learning_app -c "INSERT INTO ac
 
 启用条件：`access_codes` 表非空。启用后所有 `/api/v1/users/**` 接口要求请求头 `X-Access-Code`，且访问码必须与路径中的用户标识一致，否则返回 401。发放访问码后如还需使用旧的开发用户（如 `web-user-001`），把它的标识也插入 `access_codes` 即可。
 
+### 模型调用日志
+
+每次大模型调用（画像抽取 `extract`、画像决策 `decide`、推荐生成 `recommend`）都会写入 `model_call_logs` 表：任务类型、模型版本、输入输出快照、耗时、`status`（`success` / `fallback` 走了本地兜底 / `failed`）和失败原因。日志写入失败不影响主流程。用于定位延迟瓶颈、评估推荐质量，以及为后续自研模型积累评测数据：
+
+```powershell
+docker exec rag-postgres psql -U learning_app -d learning_app -c "SELECT task_type, status, latency_ms, created_at FROM model_call_logs ORDER BY created_at DESC LIMIT 10;"
+```
+
 页面依赖的会话查询接口：
 
 - `GET /api/v1/users/{externalId}/conversations`：列出该用户的会话（按最近更新排序，最多 100 条），`title` 为该会话首条用户消息的摘要。

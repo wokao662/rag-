@@ -18,7 +18,7 @@ import java.util.concurrent.TimeUnit;
 /** 根据当前画像和对话上下文，动态判断是继续追问还是进入推荐。 */
 public final class ConversationalProfileAgent implements AutoCloseable {
     private static final String API_URL = "https://api.siliconflow.cn/v1/chat/completions";
-    private static final String MODEL = "Qwen/Qwen3-32B";
+    public static final String MODEL = "Qwen/Qwen3-32B";
     private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
     private static final Gson GSON = new GsonBuilder().create();
     private static final String SYSTEM_PROMPT = """

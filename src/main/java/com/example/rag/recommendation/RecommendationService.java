@@ -1,5 +1,6 @@
 package com.example.rag.recommendation;
 
+import com.example.rag.observability.ModelCallLogger;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -10,6 +11,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /** 编排完整推荐链路：画像生成检索文本、Qdrant 召回、聊天模型生成、Java 校验。 */
@@ -22,6 +24,7 @@ public class RecommendationService {
     private final RecommendationChatClient chatClient;
     private final ProfileQueryBuilder queryBuilder;
     private final RecommendationValidator validator;
+    private final ModelCallLogger callLogger;
     private final AtomicBoolean collectionChecked = new AtomicBoolean();
 
     public RecommendationService(
@@ -29,17 +32,20 @@ public class RecommendationService {
             QdrantClient qdrantClient,
             RecommendationChatClient chatClient,
             ProfileQueryBuilder queryBuilder,
-            RecommendationValidator validator
+            RecommendationValidator validator,
+            ModelCallLogger callLogger
     ) {
         this.embeddingClient = embeddingClient;
         this.qdrantClient = qdrantClient;
         this.chatClient = chatClient;
         this.queryBuilder = queryBuilder;
         this.validator = validator;
+        this.callLogger = callLogger;
     }
 
-    public RecommendationResult recommend(JsonObject profile) {
+    public RecommendationResult recommend(JsonObject profile, UUID userId, UUID conversationId) {
         String queryText = queryBuilder.build(profile);
+        long start = System.currentTimeMillis();
 
         JsonArray knowledge;
         try {
@@ -48,18 +54,23 @@ public class RecommendationService {
             JsonArray hits = qdrantClient.search(queryVector, RETRIEVAL_LIMIT);
             knowledge = mergeKnowledge(buildKnowledge(hits), expandByStrategy(hits));
         } catch (IOException error) {
+            logCall(userId, conversationId, queryText, null, start, "failed", error.getMessage());
             throw new RecommendationUnavailableException("策略检索服务暂时不可用", error);
         }
 
         if (knowledge.size() == 0) {
-            return new RecommendationResult("no_match", "知识库中还没有可推荐的学习策略，请稍后再试。",
+            RecommendationResult empty = new RecommendationResult(
+                    "no_match", "知识库中还没有可推荐的学习策略，请稍后再试。",
                     queryText, List.of(), List.of(), List.of());
+            logCall(userId, conversationId, queryText, outputOf(empty), start, "success", null);
+            return empty;
         }
 
         JsonObject raw;
         try {
             raw = chatClient.generate(profile, queryText, knowledge);
         } catch (IOException error) {
+            logCall(userId, conversationId, queryText, null, start, "failed", error.getMessage());
             throw new RecommendationUnavailableException("推荐生成服务暂时不可用", error);
         }
 
@@ -67,10 +78,30 @@ public class RecommendationService {
         try {
             output = validator.validate(raw, candidateChunkIds(knowledge));
         } catch (IllegalArgumentException error) {
+            logCall(userId, conversationId, queryText, raw, start, "failed", error.getMessage());
             throw new RecommendationUnavailableException("推荐结果未通过格式校验", error);
         }
-        return new RecommendationResult(output.status(), output.answer(), queryText,
+        RecommendationResult result = new RecommendationResult(output.status(), output.answer(), queryText,
                 output.userConstraints(), output.recommendations(), output.followUpQuestions());
+        logCall(userId, conversationId, queryText, outputOf(result), start, "success", null);
+        return result;
+    }
+
+    private void logCall(UUID userId, UUID conversationId, String queryText, JsonObject output,
+                         long start, String status, String errorMessage) {
+        JsonObject input = new JsonObject();
+        input.addProperty("queryText", queryText);
+        callLogger.log(userId, conversationId, "recommend", RecommendationChatClient.MODEL,
+                input, output, System.currentTimeMillis() - start, status, errorMessage);
+    }
+
+    private static JsonObject outputOf(RecommendationResult result) {
+        JsonObject output = new JsonObject();
+        output.addProperty("status", result.status());
+        JsonArray strategies = new JsonArray();
+        result.recommendations().forEach(recommendation -> strategies.add(recommendation.strategyId()));
+        output.add("strategyIds", strategies);
+        return output;
     }
 
     private void ensureCollection() throws IOException {
