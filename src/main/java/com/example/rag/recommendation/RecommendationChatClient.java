@@ -16,7 +16,7 @@ import java.util.concurrent.TimeUnit;
 /** 调用聊天模型，基于检索到的策略 chunk 为当前画像生成结构化推荐；不直接写数据库。 */
 public final class RecommendationChatClient implements AutoCloseable {
     private static final String API_URL = "https://api.siliconflow.cn/v1/chat/completions";
-    private static final String MODEL = "Qwen/Qwen3-32B";
+    public static final String MODEL = "Qwen/Qwen3-32B";
     private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
     private static final Gson GSON = new Gson();
     private static final String SYSTEM_PROMPT = """

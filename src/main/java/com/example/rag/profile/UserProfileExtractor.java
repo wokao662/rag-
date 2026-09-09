@@ -18,7 +18,7 @@ import java.util.concurrent.TimeUnit;
 /** 使用聊天模型从用户原话中抽取结构化画像候选；不直接写数据库。 */
 public final class UserProfileExtractor implements AutoCloseable {
     private static final String API_URL = "https://api.siliconflow.cn/v1/chat/completions";
-    private static final String MODEL = "Qwen/Qwen3-32B";
+    public static final String MODEL = "Qwen/Qwen3-32B";
     private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final String SYSTEM_PROMPT = """

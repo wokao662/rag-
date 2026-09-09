@@ -1,5 +1,6 @@
 package com.example.rag.profile;
 
+import com.example.rag.observability.ModelCallLogger;
 import com.example.rag.recommendation.RecommendationService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -34,6 +35,7 @@ public class UserProfileService {
     private final UserProfileMerger merger;
     private final ProfileReadinessPolicy readinessPolicy;
     private final RecommendationService recommendationService;
+    private final ModelCallLogger callLogger;
     private final UserRepository users = new UserRepository();
     private final ConversationRepository conversations = new ConversationRepository();
     private final MessageRepository messages = new MessageRepository();
@@ -48,7 +50,8 @@ public class UserProfileService {
             UserProfileValidator validator,
             UserProfileMerger merger,
             ProfileReadinessPolicy readinessPolicy,
-            RecommendationService recommendationService
+            RecommendationService recommendationService,
+            ModelCallLogger callLogger
     ) {
         this.dataSource = dataSource;
         this.transactions = transactions;
@@ -59,6 +62,7 @@ public class UserProfileService {
         this.merger = merger;
         this.readinessPolicy = readinessPolicy;
         this.recommendationService = recommendationService;
+        this.callLogger = callLogger;
     }
 
     public ConversationStarted startConversation(String externalId) {
@@ -88,20 +92,28 @@ public class UserProfileService {
         });
 
         JsonObject extraction;
+        JsonObject extractInput = new JsonObject();
+        extractInput.addProperty("currentUserMessage", content.trim());
+        long extractStart = System.currentTimeMillis();
         try {
             extraction = extractor.extract(context.profile(), context.recentMessages(), content.trim());
+            callLogger.log(context.userId(), conversationId, "extract", UserProfileExtractor.MODEL,
+                    extractInput, extraction, System.currentTimeMillis() - extractStart, "success", null);
         } catch (IOException error) {
+            callLogger.log(context.userId(), conversationId, "extract", UserProfileExtractor.MODEL,
+                    extractInput, null, System.currentTimeMillis() - extractStart, "failed", error.getMessage());
             throw new ProfileModelException("画像抽取服务暂时不可用", error);
         }
         UserProfileValidator.ValidationResult validation = validator.validate(extraction, content.trim());
         JsonObject merged = merger.merge(context.profile(), validation.acceptedUpdates(), context.messageId());
         ProfileReadinessPolicy.Decision fallback = readinessPolicy.evaluate(merged);
-        ProfileDecisionValidator.Decision decision = decideWithFallback(merged, context.recentMessages(), fallback);
+        ProfileDecisionValidator.Decision decision = decideWithFallback(
+                merged, context.recentMessages(), fallback, context.userId(), conversationId);
 
         RecommendationService.RecommendationResult recommendation = null;
         if (decision.ready()) {
             try {
-                recommendation = recommendationService.recommend(merged);
+                recommendation = recommendationService.recommend(merged, context.userId(), conversationId);
             } catch (RecommendationService.RecommendationUnavailableException ignored) {
                 // 推荐失败不阻断画像流程，前端可稍后通过推荐接口重试。
             }
@@ -174,13 +186,15 @@ public class UserProfileService {
 
     public RecommendationService.RecommendationResult recommend(String externalId) {
         String normalizedId = normalizeExternalId(externalId);
+        UUID[] userHolder = new UUID[1];
         JsonObject profile = inTransaction(connection -> {
             UUID userId = requireUser(connection, normalizedId);
+            userHolder[0] = userId;
             return profiles.findByUserId(connection, userId)
                     .map(UserProfileRepository.StoredProfile::profile)
                     .orElseThrow(() -> new ProfileNotFoundException("该用户还没有画像"));
         });
-        return recommendationService.recommend(profile);
+        return recommendationService.recommend(profile, userHolder[0], null);
     }
 
     private static final int CONVERSATION_TITLE_LENGTH = 30;
@@ -196,11 +210,24 @@ public class UserProfileService {
     private ProfileDecisionValidator.Decision decideWithFallback(
             JsonObject profile,
             List<MessageRepository.StoredMessage> recent,
-            ProfileReadinessPolicy.Decision fallback
+            ProfileReadinessPolicy.Decision fallback,
+            UUID userId,
+            UUID conversationId
     ) {
+        long start = System.currentTimeMillis();
         try {
-            return profileAgent.decide(profile, recent);
-        } catch (Exception ignored) {
+            ProfileDecisionValidator.Decision decision = profileAgent.decide(profile, recent);
+            JsonObject output = new JsonObject();
+            output.addProperty("action", decision.action());
+            output.addProperty("ready", decision.ready());
+            output.addProperty("confidence", decision.confidence());
+            output.addProperty("reason", decision.reason());
+            callLogger.log(userId, conversationId, "decide", ConversationalProfileAgent.MODEL,
+                    null, output, System.currentTimeMillis() - start, "success", null);
+            return decision;
+        } catch (Exception error) {
+            callLogger.log(userId, conversationId, "decide", ConversationalProfileAgent.MODEL,
+                    null, null, System.currentTimeMillis() - start, "fallback", error.getMessage());
             return new ProfileDecisionValidator.Decision(
                     fallback.ready() ? "recommend" : "ask", fallback.ready(), 0,
                     "画像 Agent 调用失败，使用本地兜底规则", fallback.missingFields(), List.of(),
