@@ -1,6 +1,7 @@
 package com.example.rag.api;
 
 import com.example.rag.profile.UserProfileService;
+import com.example.rag.recommendation.FeedbackService;
 import com.example.rag.recommendation.RecommendationService;
 import com.example.rag.recommendation.RecommendationValidator;
 import org.junit.jupiter.api.Test;
@@ -26,6 +27,9 @@ class UserProfileControllerTest {
 
     @MockitoBean
     private UserProfileService profileService;
+
+    @MockitoBean
+    private FeedbackService feedbackService;
 
     @Test
     void createsConversation() throws Exception {
@@ -110,6 +114,29 @@ class UserProfileControllerTest {
         mockMvc.perform(post("/api/v1/users/web-user-001/recommendations"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.title").value("资源不存在"));
+    }
+
+    @Test
+    void recordsFeedback() throws Exception {
+        UUID messageId = UUID.randomUUID();
+        when(feedbackService.record("web-user-001", messageId, "strategy-keyword-mnemonic", "adopted"))
+                .thenReturn(new FeedbackService.FeedbackResult(
+                        messageId, "strategy-keyword-mnemonic", "adopted"));
+
+        mockMvc.perform(post("/api/v1/users/web-user-001/messages/{id}/feedback", messageId)
+                        .contentType("application/json")
+                        .content("{\"strategyId\":\"strategy-keyword-mnemonic\",\"action\":\"adopted\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.strategyId").value("strategy-keyword-mnemonic"))
+                .andExpect(jsonPath("$.action").value("adopted"));
+    }
+
+    @Test
+    void rejectsInvalidFeedbackAction() throws Exception {
+        mockMvc.perform(post("/api/v1/users/web-user-001/messages/{id}/feedback", UUID.randomUUID())
+                        .contentType("application/json")
+                        .content("{\"strategyId\":\"strategy-keyword-mnemonic\",\"action\":\"love\"}"))
+                .andExpect(status().isBadRequest());
     }
 
     @Test
