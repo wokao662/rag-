@@ -298,7 +298,7 @@ http://127.0.0.1:8080/
 
 页面由 Spring Boot 直接托管（`src/main/resources/static`），无需额外构建。功能：
 
-- 首次打开自动生成本地用户标识，无需手动输入；接入正式认证后无缝替换。
+- 发放访问码后，页面首次使用要求输入访问码才能进入；未发放任何访问码时为本地开发模式，不启用拦截。
 - 未开始对话时显示欢迎页和示例问题，点击示例即可直接发送。
 - 聊天窗口发送消息后，画像不足时显示助手的追问（带“正在输入”状态），画像充足时自动展示推荐卡片（策略名称、具体步骤、推荐理由、注意事项和来源）。
 - 右上角“我的画像”抽屉展示当前画像，每个字段附用户原话引用（画像只能由系统根据对话更新，不提供手动编辑）。
@@ -315,6 +315,18 @@ Invoke-RestMethod `
 ```
 
 `action` 只能是 `adopted` 或 `dismissed`；消息必须属于该用户的会话，否则返回 404。推荐消息 ID 来自消息接口响应的 `assistantMessageId`，或消息历史接口的 `messageId`。
+
+### 访问码（测试期）
+
+给测试人员发放访问码（直接在数据库插入）：
+
+```powershell
+docker exec rag-postgres psql -U learning_app -d learning_app -c "INSERT INTO access_codes (code, label) VALUES ('TEST-8F3K2', '发给张三');"
+```
+
+一个访问码对应一个独立的用户空间（访问码即用户标识，首次使用自动创建用户）。收回权限：`UPDATE access_codes SET revoked = TRUE WHERE code = 'TEST-8F3K2';`。
+
+启用条件：`access_codes` 表非空。启用后所有 `/api/v1/users/**` 接口要求请求头 `X-Access-Code`，且访问码必须与路径中的用户标识一致，否则返回 401。发放访问码后如还需使用旧的开发用户（如 `web-user-001`），把它的标识也插入 `access_codes` 即可。
 
 页面依赖的会话查询接口：
 
