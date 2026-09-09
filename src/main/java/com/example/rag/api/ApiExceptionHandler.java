@@ -1,6 +1,7 @@
 package com.example.rag.api;
 
 import com.example.rag.profile.UserProfileService;
+import com.example.rag.recommendation.RecommendationService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import org.springframework.dao.DataAccessException;
@@ -35,6 +36,11 @@ public class ApiExceptionHandler {
     @ExceptionHandler(UserProfileService.ProfileModelException.class)
     ResponseEntity<ProblemDetail> modelUnavailable(RuntimeException error, HttpServletRequest request) {
         return problem(HttpStatus.BAD_GATEWAY, "画像模型不可用", error.getMessage(), request);
+    }
+
+    @ExceptionHandler(RecommendationService.RecommendationUnavailableException.class)
+    ResponseEntity<ProblemDetail> recommendationUnavailable(RuntimeException error, HttpServletRequest request) {
+        return problem(HttpStatus.BAD_GATEWAY, "推荐服务不可用", error.getMessage(), request);
     }
 
     @ExceptionHandler(DataAccessException.class)
