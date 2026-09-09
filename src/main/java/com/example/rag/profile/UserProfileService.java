@@ -120,6 +120,7 @@ public class UserProfileService {
         }
 
         RecommendationService.RecommendationResult finalRecommendation = recommendation;
+        UUID[] assistantMessageId = new UUID[1];
         inTransaction(connection -> {
             boolean saved = profiles.saveIfVersion(
                     connection, context.userId(), merged, fallback.completeness(), context.profileVersion());
@@ -129,13 +130,15 @@ public class UserProfileService {
                 metadata.addProperty("messageType", "profile_question");
                 metadata.addProperty("decisionConfidence", decision.confidence());
                 metadata.addProperty("decisionReason", decision.reason());
-                messages.save(connection, conversationId, "assistant", decision.nextQuestion(), metadata);
+                assistantMessageId[0] = messages.save(
+                        connection, conversationId, "assistant", decision.nextQuestion(), metadata);
             } else if (finalRecommendation != null) {
                 JsonObject metadata = new JsonObject();
                 metadata.addProperty("messageType", "recommendation");
                 metadata.addProperty("recommendationStatus", finalRecommendation.status());
                 metadata.add("recommendation", JsonParser.parseString(GSON.toJson(finalRecommendation)));
-                messages.save(connection, conversationId, "assistant", finalRecommendation.answer(), metadata);
+                assistantMessageId[0] = messages.save(
+                        connection, conversationId, "assistant", finalRecommendation.answer(), metadata);
             }
             return null;
         });
@@ -144,7 +147,7 @@ public class UserProfileService {
                 decision.action(), decision.ready(), fallback.completeness(), decision.confidence(),
                 decision.reason(), decision.nextQuestion(), decision.missingInformation(),
                 decision.conflicts(), toMap(merged), toMap(validation.acceptedUpdates()),
-                validation.rejections().size(), finalRecommendation);
+                validation.rejections().size(), finalRecommendation, assistantMessageId[0]);
     }
 
     public ProfileResult getProfile(String externalId) {
@@ -326,7 +329,8 @@ public class UserProfileService {
             Map<String, Object> profile,
             Map<String, Object> acceptedUpdates,
             int rejectedUpdateCount,
-            RecommendationService.RecommendationResult recommendation
+            RecommendationService.RecommendationResult recommendation,
+            UUID assistantMessageId
     ) {
     }
 

@@ -145,7 +145,8 @@ async function sendMessage(event) {
                 renderMessage({
                     role: "assistant",
                     content: turn.recommendation.answer,
-                    recommendation: turn.recommendation
+                    recommendation: turn.recommendation,
+                    messageId: turn.assistantMessageId
                 });
             }
             loadProfile();
@@ -183,7 +184,7 @@ function renderMessage(message) {
         (message.metadata && message.metadata.messageType === "recommendation"
             ? message.metadata.recommendation : null);
     if (recommendation) {
-        bubble.appendChild(renderRecommendation(recommendation));
+        bubble.appendChild(renderRecommendation(recommendation, message.messageId || null));
     }
 
     row.appendChild(body);
@@ -200,7 +201,7 @@ function renderTyping() {
     return row;
 }
 
-function renderRecommendation(result) {
+function renderRecommendation(result, messageId) {
     const card = document.createElement("div");
     card.className = "recommendation-card";
 
@@ -245,6 +246,10 @@ function renderRecommendation(result) {
         meta.textContent = "来源 " + (recommendation.sourceIds || []).join("、");
         block.appendChild(meta);
 
+        if (messageId) {
+            block.appendChild(renderFeedbackActions(messageId, recommendation.strategyId));
+        }
+
         card.appendChild(block);
     });
 
@@ -256,6 +261,36 @@ function renderRecommendation(result) {
     });
 
     return card;
+}
+
+function renderFeedbackActions(messageId, strategyId) {
+    const actions = document.createElement("div");
+    actions.className = "feedback-actions";
+    actions.appendChild(feedbackButton("采纳", messageId, strategyId, "adopted"));
+    actions.appendChild(feedbackButton("不感兴趣", messageId, strategyId, "dismissed"));
+    return actions;
+}
+
+function feedbackButton(label, messageId, strategyId, action) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = label;
+    button.addEventListener("click", async () => {
+        const container = button.parentElement;
+        container.querySelectorAll("button").forEach(item => item.disabled = true);
+        try {
+            await http("POST", `/messages/${messageId}/feedback`, { strategyId, action });
+            button.classList.add("chosen");
+            const note = document.createElement("span");
+            note.className = "feedback-note";
+            note.textContent = "已记录";
+            container.appendChild(note);
+        } catch (error) {
+            container.querySelectorAll("button").forEach(item => item.disabled = false);
+            showStatus(error.message);
+        }
+    });
+    return button;
 }
 
 async function loadProfile() {

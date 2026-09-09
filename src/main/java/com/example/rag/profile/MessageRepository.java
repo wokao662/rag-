@@ -55,6 +55,24 @@ public final class MessageRepository {
         }
     }
 
+    /** 判断消息是否属于该用户的会话，用于反馈等跨表操作前的归属校验。 */
+    public boolean belongsToUser(Connection connection, UUID messageId, UUID userId) throws SQLException {
+        String sql = """
+                SELECT EXISTS (
+                    SELECT 1 FROM messages m
+                    JOIN conversations c ON m.conversation_id = c.id
+                    WHERE m.id = ? AND c.user_id = ?
+                )
+                """;
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setObject(1, messageId);
+            statement.setObject(2, userId);
+            try (ResultSet result = statement.executeQuery()) {
+                return result.next() && result.getBoolean(1);
+            }
+        }
+    }
+
     public List<StoredMessage> findRecent(Connection connection, UUID conversationId, int limit)
             throws SQLException {
         if (limit < 1 || limit > 100) {
