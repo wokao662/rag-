@@ -14,7 +14,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/** 编排完整推荐链路：画像生成检索文本、Qdrant 召回、聊天模型生成、Java 校验。 */
+/** 编排完整推荐链路：画像生成检索文本、Qdrant 召回、治理闸门过滤、聊天模型生成、Java 校验。 */
 @Service
 public class RecommendationService {
     private static final int RETRIEVAL_LIMIT = 5;
@@ -25,6 +25,7 @@ public class RecommendationService {
     private final ProfileQueryBuilder queryBuilder;
     private final RecommendationValidator validator;
     private final ModelCallLogger callLogger;
+    private final StrategyGovernanceService governance;
     private final AtomicBoolean collectionChecked = new AtomicBoolean();
 
     public RecommendationService(
@@ -33,7 +34,8 @@ public class RecommendationService {
             RecommendationChatClient chatClient,
             ProfileQueryBuilder queryBuilder,
             RecommendationValidator validator,
-            ModelCallLogger callLogger
+            ModelCallLogger callLogger,
+            StrategyGovernanceService governance
     ) {
         this.embeddingClient = embeddingClient;
         this.qdrantClient = qdrantClient;
@@ -41,6 +43,7 @@ public class RecommendationService {
         this.queryBuilder = queryBuilder;
         this.validator = validator;
         this.callLogger = callLogger;
+        this.governance = governance;
     }
 
     public RecommendationResult recommend(JsonObject profile, UUID userId, UUID conversationId) {
@@ -48,13 +51,17 @@ public class RecommendationService {
         long start = System.currentTimeMillis();
 
         JsonArray knowledge;
+        int filteredOut;
         try {
             ensureCollection();
             List<Float> queryVector = embeddingClient.embedQuery(queryText);
             JsonArray hits = qdrantClient.search(queryVector, RETRIEVAL_LIMIT);
-            knowledge = mergeKnowledge(buildKnowledge(hits), expandByStrategy(hits));
+            // 闸门在召回之后、补齐之前：被挡下的策略连它的其他 chunk 也不应该被拉回来送给模型。
+            JsonArray admitted = admit(hits);
+            filteredOut = hits.size() - admitted.size();
+            knowledge = mergeKnowledge(buildKnowledge(admitted), expandByStrategy(admitted));
         } catch (IOException error) {
-            logCall(userId, conversationId, queryText, null, start, "failed", error.getMessage());
+            logCall(userId, conversationId, queryText, 0, null, start, "failed", error.getMessage());
             throw new RecommendationUnavailableException("策略检索服务暂时不可用", error);
         }
 
@@ -62,7 +69,7 @@ public class RecommendationService {
             RecommendationResult empty = new RecommendationResult(
                     "no_match", "知识库中还没有可推荐的学习策略，请稍后再试。",
                     queryText, List.of(), List.of(), List.of());
-            logCall(userId, conversationId, queryText, outputOf(empty), start, "success", null);
+            logCall(userId, conversationId, queryText, filteredOut, outputOf(empty), start, "success", null);
             return empty;
         }
 
@@ -70,7 +77,7 @@ public class RecommendationService {
         try {
             raw = chatClient.generate(profile, queryText, knowledge);
         } catch (IOException error) {
-            logCall(userId, conversationId, queryText, null, start, "failed", error.getMessage());
+            logCall(userId, conversationId, queryText, filteredOut, null, start, "failed", error.getMessage());
             throw new RecommendationUnavailableException("推荐生成服务暂时不可用", error);
         }
 
@@ -78,19 +85,82 @@ public class RecommendationService {
         try {
             output = validator.validate(raw, candidateChunkIds(knowledge));
         } catch (IllegalArgumentException error) {
-            logCall(userId, conversationId, queryText, raw, start, "failed", error.getMessage());
+            logCall(userId, conversationId, queryText, filteredOut, raw, start, "failed", error.getMessage());
             throw new RecommendationUnavailableException("推荐结果未通过格式校验", error);
         }
         RecommendationResult result = new RecommendationResult(output.status(), output.answer(), queryText,
                 output.userConstraints(), output.recommendations(), output.followUpQuestions());
-        logCall(userId, conversationId, queryText, outputOf(result), start, "success", null);
+        logCall(userId, conversationId, queryText, filteredOut, outputOf(result), start, "success", null);
+        recordExposure(userId, result.recommendations());
         return result;
     }
 
-    private void logCall(UUID userId, UUID conversationId, String queryText, JsonObject output,
-                         long start, String status, String errorMessage) {
+    /**
+     * 用治理闸门过滤召回结果：未审核通过、待归档、已暂停或超出当前档位曝光人数上限的策略不进入推荐。
+     *
+     * <p>此前 reviewStatus 只写在 Qdrant payload 里而 Java 从不读取，draft 内容直接对外服务。
+     */
+    private JsonArray admit(JsonArray hits) {
+        List<String> candidates = strategyIdsOf(hits);
+        if (candidates.isEmpty()) return hits;
+        Set<String> allowed;
+        try {
+            allowed = governance.recommendable(candidates);
+        } catch (RuntimeException error) {
+            // 闸门查不动时宁可保守：挡下全部候选，也不能把未审核内容当作已审核推给用户。
+            System.err.println("策略闸门查询失败，本次不推荐任何策略：" + error.getMessage());
+            return new JsonArray();
+        }
+        return admitByGate(hits, allowed);
+    }
+
+    /**
+     * 记录本次推荐曝光，驱动渐进投放的人数上限与扩量。
+     *
+     * <p>失败不阻断主流程（与 ModelCallLogger 同一原则）：推荐已经生成，不能因为记账写入失败
+     * 就把它丢掉；曝光计数偏差下一次推荐就会补上。
+     */
+    private void recordExposure(UUID userId, List<RecommendationValidator.Recommendation> recommendations) {
+        if (userId == null || recommendations == null || recommendations.isEmpty()) return;
+        List<String> exposed = recommendations.stream()
+                .map(RecommendationValidator.Recommendation::strategyId)
+                .toList();
+        try {
+            governance.recordExposure(userId, exposed);
+        } catch (RuntimeException error) {
+            System.err.println("记录策略曝光失败，不影响本次推荐：" + error.getMessage());
+        }
+    }
+
+    /** 只保留通过闸门的命中。allowed 为 null 时不过滤。 */
+    static JsonArray admitByGate(JsonArray hits, Set<String> allowed) {
+        if (allowed == null) return hits;
+        JsonArray admitted = new JsonArray();
+        for (JsonElement element : hits) {
+            JsonObject hit = element.getAsJsonObject();
+            String strategyId = hit.getAsJsonObject("payload").get("strategyId").getAsString();
+            if (allowed.contains(strategyId)) admitted.add(hit);
+        }
+        return admitted;
+    }
+
+    /** 召回结果里出现过的策略 ID，去重且保留召回顺序。 */
+    static List<String> strategyIdsOf(JsonArray hits) {
+        List<String> strategyIds = new ArrayList<>();
+        for (JsonElement element : hits) {
+            String strategyId = element.getAsJsonObject().getAsJsonObject("payload")
+                    .get("strategyId").getAsString();
+            if (!strategyIds.contains(strategyId)) strategyIds.add(strategyId);
+        }
+        return strategyIds;
+    }
+
+    private void logCall(UUID userId, UUID conversationId, String queryText, int gateFilteredOut,
+                         JsonObject output, long start, String status, String errorMessage) {
         JsonObject input = new JsonObject();
         input.addProperty("queryText", queryText);
+        // 把闸门挡下的数量记进日志：推荐突然变空时，这是区分“没召回”与“被闸门挡下”的唯一证据。
+        input.addProperty("gateFilteredOut", gateFilteredOut);
         callLogger.log(userId, conversationId, "recommend", RecommendationChatClient.MODEL,
                 input, output, System.currentTimeMillis() - start, status, errorMessage);
     }
@@ -112,12 +182,7 @@ public class RecommendationService {
 
     /** 把召回命中策略的全部 chunk 拉回，避免模型只看到定义片段而缺少实施步骤。 */
     private JsonArray expandByStrategy(JsonArray hits) throws IOException {
-        List<String> strategyIds = new ArrayList<>();
-        for (JsonElement element : hits) {
-            String strategyId = element.getAsJsonObject().getAsJsonObject("payload")
-                    .get("strategyId").getAsString();
-            if (!strategyIds.contains(strategyId)) strategyIds.add(strategyId);
-        }
+        List<String> strategyIds = strategyIdsOf(hits);
         return strategyIds.isEmpty() ? new JsonArray() : qdrantClient.findByStrategyIds(strategyIds);
     }
 

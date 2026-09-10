@@ -45,3 +45,10 @@ management:
 info:
   app:
     name: ${spring.application.name}
+
+app:
+  governance:
+    # 审核闸门。13 个策略档案目前全是 draft，开启会把推荐过滤成全空，因此人工审核完成前
+    # 保持 false。关闭时仍然拦两类：无源档案（无法溯源）与被真实反馈证伪（足够多人试过且有用率
+    # 过低）的策略；曝光计数、社区分与合成总分照常累计。审核完成、把通过的策略置为 approved 后改 true。
+    review-gate: ${GOVERNANCE_REVIEW_GATE:false}

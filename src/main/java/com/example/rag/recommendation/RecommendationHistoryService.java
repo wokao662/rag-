@@ -35,14 +35,17 @@ public class RecommendationHistoryService {
 
     private final DataSource dataSource;
     private final TransactionTemplate transactions;
+    private final StrategyGovernanceService governance;
     private final UserRepository users = new UserRepository();
     private final MessageRepository messages = new MessageRepository();
     private final FeedbackRepository likes = new FeedbackRepository();
     private final TrialFeedbackRepository trials = new TrialFeedbackRepository();
 
-    public RecommendationHistoryService(DataSource dataSource, TransactionTemplate transactions) {
+    public RecommendationHistoryService(DataSource dataSource, TransactionTemplate transactions,
+                                        StrategyGovernanceService governance) {
         this.dataSource = dataSource;
         this.transactions = transactions;
+        this.governance = governance;
     }
 
     /** 读取该用户历史上收到过的全部推荐，并带上点赞与尝试后反馈的当前状态。 */
@@ -120,6 +123,10 @@ public class RecommendationHistoryService {
             TrialFeedbackRepository.TrialFeedback saved = trials.save(
                     connection, userId, normalizedStrategyId, submission.tried(),
                     submission.outcome(), submission.note(), sourceMessageId);
+            // 同一事务内重算，保证反馈与分数不会处于“已写入但未生效”的中间态：
+            // 分数是派生值，跟反馈一起提交或一起回滚。TransactionTemplate 默认 REQUIRED，
+            // 这里会加入当前事务而不是新开一个。
+            governance.recalculate(normalizedStrategyId);
             return toTrialState(saved);
         });
     }
