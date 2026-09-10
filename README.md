@@ -162,13 +162,13 @@ docker exec rag-postgres psql -U learning_app -d learning_app -c "\dt"
 验证 Java JDBC 连接和四张表的读写（测试数据会在事务中回滚）：
 
 ```powershell
-mvn compile exec:java "-Dexec.mainClass=DatabaseConnectionTest"
+mvn compile exec:java "-Dexec.mainClass=com.example.rag.cli.DatabaseConnectionTest"
 ```
 
 运行持久化多轮用户画像测试（输入 `exit` 结束）：
 
 ```powershell
-mvn compile exec:java "-Dexec.mainClass=UserProfileConversationTest"
+mvn compile exec:java "-Dexec.mainClass=com.example.rag.cli.UserProfileConversationTest"
 ```
 
 不提供参数时，程序会为本次运行生成一个独立的测试用户，避免读取上一次测试遗留的画像。终端输入使用 JVM 当前默认编码；在中文 Windows 环境中通常为 GBK，避免强制按 UTF-8 读取造成乱码。
@@ -176,7 +176,7 @@ mvn compile exec:java "-Dexec.mainClass=UserProfileConversationTest"
 如果需要跨多次运行继续测试同一个用户，可以明确指定稳定的用户 ID：
 
 ```powershell
-mvn compile exec:java "-Dexec.mainClass=UserProfileConversationTest" "-Dexec.args=profile-test-user-001"
+mvn compile exec:java "-Dexec.mainClass=com.example.rag.cli.UserProfileConversationTest" "-Dexec.args=profile-test-user-001"
 ```
 
 指定相同 ID 会有意复用该用户在 PostgreSQL 中的历史画像；需要测试全新画像时不要传入 ID，或者改用新的 ID。
@@ -201,7 +201,7 @@ docker compose stop postgres
 
 ## Spring Boot 后端
 
-正式后端入口为 `com.example.rag.RagApplication`。旧的命令行测试类暂时保留，用于验证模型和 RAG 链路，但 WebApp 后续只调用 Spring Boot HTTP API。
+正式后端入口为 `com.example.rag.RagApplication`。命令行测试类已整理到 `com.example.rag.cli` 包下（`LLMTest` 已删除），用于验证模型和 RAG 链路；WebApp 后续只调用 Spring Boot HTTP API。
 
 先启动 PostgreSQL：
 

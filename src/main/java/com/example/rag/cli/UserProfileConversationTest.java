@@ -1,3 +1,5 @@
+package com.example.rag.cli;
+
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
@@ -94,7 +96,7 @@ public final class UserProfileConversationTest {
                             fallbackDecision.ready() ? "recommend" : "ask",
                             fallbackDecision.ready(), 0,
                             "画像 Agent 调用失败，使用本地兜底规则",
-                            fallbackDecision.missingFields(), List.of(),
+                            fallbackDecision.ready() ? List.of() : fallbackDecision.missingFields(), List.of(),
                             fallbackDecision.followUpQuestion() == null
                                     ? "" : fallbackDecision.followUpQuestion());
                 }
