@@ -38,6 +38,17 @@ class ModelCallSanitizerTest {
     }
 
     @Test
+    void scrubsGroupedIdentifiersWithSpacesAndHyphens() {
+        // 这三类标识符在中文里常按分组书写，组间是空格或连字符且可混用。
+        // 用户照卡片或表格抄号码时几乎不会写成一整串，所以漏掉分组写法就是真的泄露。
+        assertEquals("手机号[手机号]", ModelCallSanitizer.scrubText("手机号138 0013 8000"));
+        assertEquals("手机号[手机号]", ModelCallSanitizer.scrubText("手机号+86 138 0013 8000"));
+        assertEquals("手机号[手机号]", ModelCallSanitizer.scrubText("手机号138-0013 8000"));
+        assertEquals("卡号[卡号]", ModelCallSanitizer.scrubText("卡号6222 0000 0000 0000"));
+        assertEquals("证件号[证件号]", ModelCallSanitizer.scrubText("证件号110101-19900307-451X"));
+    }
+
+    @Test
     void scrubsLongDigitRunsAsCatchAll() {
         // 学号、工号、QQ 号都在这一类，靠 8 位以上连续数字兜住。
         assertEquals("学号[数字串]", ModelCallSanitizer.scrubText("学号20231234"));
@@ -48,6 +59,16 @@ class ModelCallSanitizerTest {
         // 误伤这些数字就等于毁掉训练数据：它们正是画像要抽的字段值。
         String text = "我每天学习60分钟，一周3次，已经背了3000个单词，坚持了21天";
         assertEquals(text, ModelCallSanitizer.scrubText(text));
+    }
+
+    @Test
+    void keepsYearRangesAndEnumerationsIntact() {
+        // 放宽分隔符最大的风险就是把数字列举和区间吃掉。这里能守住靠两道闸：
+        // 年份列举首位是 2，落在银行卡分组分支的 [3-6] 与手机号的 1[3-9] 之外；
+        // 区间只凑得出两组数字，而银行卡分组分支要求整整四组。
+        assertEquals("2020 2021 2022 2023 都考过", ModelCallSanitizer.scrubText("2020 2021 2022 2023 都考过"));
+        assertEquals("学年2024-2025", ModelCallSanitizer.scrubText("学年2024-2025"));
+        assertEquals("词汇量3000-5000", ModelCallSanitizer.scrubText("词汇量3000-5000"));
     }
 
     @Test

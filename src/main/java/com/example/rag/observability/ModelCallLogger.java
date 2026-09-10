@@ -104,7 +104,11 @@ public class ModelCallLogger {
                 System.out.println("已清理超过 " + retentionDays + " 天的模型调用日志 " + deleted + " 条");
             }
         } catch (RuntimeException error) {
-            System.err.println("清理模型调用日志失败，将在下次调度重试：" + error.getMessage());
+            // 打整个栈，并不再拼 getMessage：内层已经把 message 包成“清理模型调用日志失败”，
+            // 再拼一次只会印出一句自我重复、零信息的话，真正的 SQL 错误在 cause 里。
+            // 清理失败意味着对用户的日志保留期承诺没有兑现，而这条路径失败不会有任何其他迹象。
+            System.err.println("模型调用日志清理未完成，将在下次调度重试");
+            error.printStackTrace(System.err);
         }
     }
 }

@@ -34,9 +34,15 @@ public final class StrategyGovernanceRepository {
     ) {
     }
 
-    /** 合成总分需要的三个输入分。evidence 与 effectiveness 不由反馈消费写入，这里只读。 */
-    public record ScoreRow(String strategyId, double evidenceScore, double effectivenessScore,
-                           double communityScore) {
+    /**
+     * 合成总分需要的两个输入分。它们由导入器与审核者写，反馈消费只读不写。
+     *
+     * <p>这里刻意不读 {@code community_score}：它是本服务自己写出去的派生值，读回来再写回去
+     * 就等于让公式依赖自己的上一次输出。那样一旦样本量从门槛上跌回门槛下（用户可以把
+     * {@code tried} 改回 false），旧值就会永久停在库里，从零重放反馈再也得不到它。
+     * 不读它，重算才真的是事实表的纯函数。
+     */
+    public record ScoreRow(String strategyId, double evidenceScore, double effectivenessScore) {
     }
 
     /**
@@ -176,14 +182,14 @@ public final class StrategyGovernanceRepository {
     }
 
     /**
-     * 读取策略的三个输入分，供重算合成总分时使用。
+     * 读取策略的两个输入分，供重算合成总分时使用。
      *
      * @param strategyIds 限定范围；null 或空表示全部策略
      */
     public Map<String, ScoreRow> currentScores(Connection connection, Collection<String> strategyIds)
             throws SQLException {
         String sql = """
-                SELECT strategy_id, evidence_score, effectiveness_score, community_score
+                SELECT strategy_id, evidence_score, effectiveness_score
                 FROM strategies
                 %s
                 """.formatted(whereIn(strategyIds));
@@ -195,8 +201,7 @@ public final class StrategyGovernanceRepository {
                     ScoreRow row = new ScoreRow(
                             result.getString("strategy_id"),
                             result.getDouble("evidence_score"),
-                            result.getDouble("effectiveness_score"),
-                            result.getDouble("community_score"));
+                            result.getDouble("effectiveness_score"));
                     rows.put(row.strategyId(), row);
                 }
             }

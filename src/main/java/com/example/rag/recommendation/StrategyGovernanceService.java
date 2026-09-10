@@ -78,7 +78,11 @@ public class StrategyGovernanceService {
             System.out.println("策略推荐分已根据尝试后反馈重算（审核闸门："
                     + (reviewGate ? "已开启" : "关闭，只拦无档案与已证伪的策略") + "）");
         } catch (RuntimeException error) {
+            // 打整个栈：内层抛的是 DataAccessResourceFailureException("数据库操作失败")，
+            // 只取 message 会印出一句没有任何信息的话，而真正的 SQL 错误在 cause 里。
+            // 启动重算失败意味着全部派生分停在旧值且无线索可查。
             System.err.println("启动时重算策略推荐分失败，不影响启动：" + error.getMessage());
+            error.printStackTrace(System.err);
         }
     }
 
@@ -139,7 +143,7 @@ public class StrategyGovernanceService {
 
             int tried = trial == null ? 0 : trial.triedCount();
             int helpful = trial == null ? 0 : trial.helpfulCount();
-            double community = communityScore(trial, score.communityScore());
+            double community = communityScore(trial);
             double overall = overallScore(score.evidenceScore(), community, score.effectivenessScore());
             boolean pending = pendingArchive(trial, community);
             governance.applyScores(connection, strategyId, tried, helpful, community, overall, pending);
@@ -199,10 +203,18 @@ public class StrategyGovernanceService {
 
     /**
      * 社区分 = 有用率的 Wilson 置信下界。取"下界"而非点估计，是因为小样本时点估计过于乐观：
-     * 1 个人说有用就是 100%，下界则会把它拉回保守值。样本不足门槛时保持原值不动。
+     * 1 个人说有用就是 100%，下界则会把它拉回保守值。
+     *
+     * <p>样本不足门槛时归 0，而不是沿用库里旧值。归 0 的含义是"没有足够的社区证据，就不给
+     * 社区分加成"，此时合成分完全由证据与有效性驱动——这正是新导入策略的实际状态（导入器
+     * 拒绝写入档案里那些 triedCount=0 却带着 0.5 的占位 communityScore）。
+     *
+     * <p>沿用旧值看似保守，实际上把函数变成了非纯的：用户可以把 {@code tried} 从 true 改回
+     * false 使样本量跌破门槛，旧值就会永久停在库里，从零重放全部反馈得不到同一个数。不取
+     * 库里的值，就没什么可沿用，{@code community_score} 也才真的只是反馈表的函数。
      */
-    static double communityScore(StrategyGovernanceRepository.TrialStats trial, double current) {
-        if (trial == null || trial.triedCount() < MIN_FEEDBACK) return current;
+    static double communityScore(StrategyGovernanceRepository.TrialStats trial) {
+        if (trial == null || trial.triedCount() < MIN_FEEDBACK) return 0;
         return wilsonLower(trial.helpfulCount(), trial.triedCount(), WILSON_Z);
     }
 

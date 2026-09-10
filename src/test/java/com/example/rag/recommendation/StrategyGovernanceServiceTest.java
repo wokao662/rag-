@@ -58,24 +58,26 @@ class StrategyGovernanceServiceTest {
     }
 
     @Test
-    void communityScoreIgnoresSamplesBelowThreshold() {
-        // 门槛以下不动权重：小样本抖动会误杀或误捧方法，宁可保持导入时的原值。
-        assertEquals(0.42, StrategyGovernanceService.communityScore(trial(9, 9), 0.42), 1e-9);
-        assertEquals(0.42, StrategyGovernanceService.communityScore(null, 0.42), 1e-9);
+    void communityScoreIsZeroBelowThreshold() {
+        // 门槛以下归 0：没有足够的社区证据就不给社区分加成，合成分退回由证据与有效性驱动。
+        // 不能沿用库里旧值：用户可以把 tried 从 true 改回 false 使样本量跌破门槛，沿用旧值
+        // 会让 community_score 不再是反馈表的纯函数，从零重放全部反馈得不到同一个数。
+        assertEquals(0.0, StrategyGovernanceService.communityScore(trial(9, 9)), 1e-9);
+        assertEquals(0.0, StrategyGovernanceService.communityScore(null), 1e-9);
     }
 
     @Test
     void communityScoreAppliesWilsonAtThreshold() {
-        double atThreshold = StrategyGovernanceService.communityScore(trial(10, 10), 0.42);
+        double atThreshold = StrategyGovernanceService.communityScore(trial(10, 10));
         assertEquals(StrategyGovernanceService.wilsonLower(10, 10, 1.96), atThreshold, 1e-9);
-        assertFalse(Math.abs(atThreshold - 0.42) < 1e-9, "达到门槛后必须改写原值，而不是保持不变");
+        assertTrue(atThreshold > 0.0, "达到门槛后必须由真实反馈产生非零社区分");
     }
 
     @Test
     void partialOutcomeDoesNotCountAsHelpful() {
         // partial 由 SQL 层排除，这里验证的是"只数 helpful"这一保守口径不会被绕过：
         // 10 次试用只有 5 次明确有用，下界应低于 0.5。
-        double community = StrategyGovernanceService.communityScore(trial(10, 5), 0);
+        double community = StrategyGovernanceService.communityScore(trial(10, 5));
         assertTrue(community < 0.5, "5/10 的下界应低于点估计 0.5，实际：" + community);
     }
 
