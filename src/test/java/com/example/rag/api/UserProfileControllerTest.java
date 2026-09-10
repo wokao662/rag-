@@ -3,6 +3,7 @@ package com.example.rag.api;
 import com.example.rag.auth.AccessCodeService;
 import com.example.rag.profile.UserProfileService;
 import com.example.rag.recommendation.FeedbackService;
+import com.example.rag.recommendation.RecommendationHistoryService;
 import com.example.rag.recommendation.RecommendationService;
 import com.example.rag.recommendation.RecommendationValidator;
 import org.junit.jupiter.api.Test;
@@ -32,6 +33,9 @@ class UserProfileControllerTest {
 
     @MockitoBean
     private FeedbackService feedbackService;
+
+    @MockitoBean
+    private RecommendationHistoryService historyService;
 
     @MockitoBean
     private AccessCodeService accessCodes;
@@ -84,10 +88,10 @@ class UserProfileControllerTest {
         when(profileService.getMessages("web-user-001", conversationId))
                 .thenReturn(List.of(
                         new UserProfileService.MessageView(UUID.randomUUID(), "user",
-                                "我背单词很快忘", java.util.Map.of(), "2026-09-09T10:00:00Z"),
+                                "我背单词很快忘", java.util.Map.of(), "2026-09-09T10:00:00Z", List.of()),
                         new UserProfileService.MessageView(UUID.randomUUID(), "assistant",
                                 "你每天大约有多少学习时间？", java.util.Map.of("messageType", "profile_question"),
-                                "2026-09-09T10:00:05Z")));
+                                "2026-09-09T10:00:05Z", List.of())));
 
         mockMvc.perform(get("/api/v1/users/web-user-001/conversations/{id}/messages", conversationId))
                 .andExpect(status().isOk())
@@ -129,16 +133,16 @@ class UserProfileControllerTest {
     @Test
     void recordsFeedback() throws Exception {
         UUID messageId = UUID.randomUUID();
-        when(feedbackService.record("web-user-001", messageId, "strategy-keyword-mnemonic", "adopted"))
+        when(feedbackService.record("web-user-001", messageId, "strategy-keyword-mnemonic", "liked"))
                 .thenReturn(new FeedbackService.FeedbackResult(
-                        messageId, "strategy-keyword-mnemonic", "adopted"));
+                        messageId, "strategy-keyword-mnemonic", "liked"));
 
         mockMvc.perform(post("/api/v1/users/web-user-001/messages/{id}/feedback", messageId)
                         .contentType("application/json")
-                        .content("{\"strategyId\":\"strategy-keyword-mnemonic\",\"action\":\"adopted\"}"))
+                        .content("{\"strategyId\":\"strategy-keyword-mnemonic\",\"action\":\"liked\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.strategyId").value("strategy-keyword-mnemonic"))
-                .andExpect(jsonPath("$.action").value("adopted"));
+                .andExpect(jsonPath("$.action").value("liked"));
     }
 
     @Test
@@ -146,6 +150,83 @@ class UserProfileControllerTest {
         mockMvc.perform(post("/api/v1/users/web-user-001/messages/{id}/feedback", UUID.randomUUID())
                         .contentType("application/json")
                         .content("{\"strategyId\":\"strategy-keyword-mnemonic\",\"action\":\"love\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    /** adopted / dismissed 已随「卡片上只做点赞」的决定退役，旧客户端不能继续写入。 */
+    @Test
+    void rejectsRetiredFeedbackAction() throws Exception {
+        mockMvc.perform(post("/api/v1/users/web-user-001/messages/{id}/feedback", UUID.randomUUID())
+                        .contentType("application/json")
+                        .content("{\"strategyId\":\"strategy-keyword-mnemonic\",\"action\":\"adopted\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void returnsRecommendationHistory() throws Exception {
+        UUID messageId = UUID.randomUUID();
+        when(historyService.history("web-user-001")).thenReturn(List.of(
+                new RecommendationHistoryService.RecommendationEvent(
+                        messageId, UUID.randomUUID(), "2026-09-10T10:00:00Z", "answer", "建议使用练习测试。",
+                        List.of(new RecommendationHistoryService.RecommendedMethod(
+                                "strategy-practice-testing", "练习测试", "适合看过书但记不住的情况",
+                                List.of("合上书本回想主要内容"), List.of("source-006"), List.of(),
+                                true,
+                                new RecommendationHistoryService.TrialState(
+                                        true, "helpful", "确实记住了", "2026-09-10T12:00:00Z"))))));
+
+        mockMvc.perform(get("/api/v1/users/web-user-001/recommendation-history"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].messageId").value(messageId.toString()))
+                .andExpect(jsonPath("$[0].methods[0].strategyName").value("练习测试"))
+                .andExpect(jsonPath("$[0].methods[0].liked").value(true))
+                .andExpect(jsonPath("$[0].methods[0].trial.outcome").value("helpful"));
+    }
+
+    @Test
+    void recordsTrialFeedback() throws Exception {
+        when(historyService.submitTrialFeedback(any(), any(), any())).thenReturn(
+                new RecommendationHistoryService.TrialState(
+                        true, "helpful", "确实记住了", "2026-09-10T12:00:00Z"));
+
+        mockMvc.perform(post("/api/v1/users/web-user-001/strategies/{id}/trial-feedback",
+                        "strategy-practice-testing")
+                        .contentType("application/json")
+                        .content("{\"tried\":true,\"outcome\":\"helpful\",\"note\":\"确实记住了\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.tried").value(true))
+                .andExpect(jsonPath("$.outcome").value("helpful"));
+    }
+
+    /** 防刷校验：不能对系统没推荐过的方法提交反馈，否则会凭空污染升降权统计。 */
+    @Test
+    void rejectsTrialFeedbackForStrategyNeverRecommended() throws Exception {
+        when(historyService.submitTrialFeedback(any(), any(), any()))
+                .thenThrow(new RecommendationHistoryService.StrategyNotRecommendedException(
+                        "这个方法没有推荐给你过，无法提交反馈：strategy-fake"));
+
+        mockMvc.perform(post("/api/v1/users/web-user-001/strategies/{id}/trial-feedback", "strategy-fake")
+                        .contentType("application/json")
+                        .content("{\"tried\":true,\"outcome\":\"helpful\"}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.title").value("资源不存在"));
+    }
+
+    @Test
+    void rejectsUnknownTrialOutcome() throws Exception {
+        mockMvc.perform(post("/api/v1/users/web-user-001/strategies/{id}/trial-feedback",
+                        "strategy-practice-testing")
+                        .contentType("application/json")
+                        .content("{\"tried\":true,\"outcome\":\"amazing\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void rejectsTrialFeedbackWithoutTried() throws Exception {
+        mockMvc.perform(post("/api/v1/users/web-user-001/strategies/{id}/trial-feedback",
+                        "strategy-practice-testing")
+                        .contentType("application/json")
+                        .content("{\"outcome\":\"helpful\"}"))
                 .andExpect(status().isBadRequest());
     }
 

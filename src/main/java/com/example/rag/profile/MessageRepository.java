@@ -73,6 +73,71 @@ public final class MessageRepository {
         }
     }
 
+    /**
+     * 跨会话读取该用户收到过的全部推荐消息，按时间倒序，用于「我试过的」页面。
+     * 推荐内容当时已整体序列化进 metadata_json，因此这里读到的是快照：
+     * 即使该策略后来被降权归档，历史页仍能显示当初推荐了什么。
+     */
+    public List<StoredMessage> findRecommendationsByUser(Connection connection, UUID userId, int limit)
+            throws SQLException {
+        if (limit < 1 || limit > 500) {
+            throw new IllegalArgumentException("推荐历史读取数量必须在 1～500 之间");
+        }
+        String sql = """
+                SELECT m.id, m.conversation_id, m.role, m.content, m.metadata_json, m.created_at
+                FROM messages m
+                JOIN conversations c ON m.conversation_id = c.id
+                WHERE c.user_id = ?
+                  AND m.metadata_json->>'messageType' = 'recommendation'
+                ORDER BY m.created_at DESC, m.id DESC
+                LIMIT ?
+                """;
+        List<StoredMessage> found = new ArrayList<>();
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setObject(1, userId);
+            statement.setInt(2, limit);
+            try (ResultSet result = statement.executeQuery()) {
+                while (result.next()) {
+                    found.add(new StoredMessage(
+                            result.getObject("id", UUID.class),
+                            result.getObject("conversation_id", UUID.class),
+                            result.getString("role"),
+                            result.getString("content"),
+                            JsonParser.parseString(result.getString("metadata_json")).getAsJsonObject(),
+                            result.getObject("created_at", OffsetDateTime.class)
+                    ));
+                }
+            }
+        }
+        return found;
+    }
+
+    /**
+     * 判断某个策略是否真的推荐给过该用户。
+     * 提交尝试后反馈前必须先通过这个校验：否则任何人都能对没见过、甚至不存在的
+     * strategyId 提交反馈，直接污染驱动渐进投放升降权的统计数据。
+     */
+    public boolean wasRecommendedTo(Connection connection, UUID userId, String strategyId)
+            throws SQLException {
+        String sql = """
+                SELECT EXISTS (
+                    SELECT 1 FROM messages m
+                    JOIN conversations c ON m.conversation_id = c.id
+                    WHERE c.user_id = ?
+                      AND m.metadata_json->>'messageType' = 'recommendation'
+                      AND m.metadata_json->'recommendation'->'recommendations'
+                          @> jsonb_build_array(jsonb_build_object('strategyId', ?::text))
+                )
+                """;
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setObject(1, userId);
+            statement.setString(2, strategyId);
+            try (ResultSet result = statement.executeQuery()) {
+                return result.next() && result.getBoolean(1);
+            }
+        }
+    }
+
     public List<StoredMessage> findRecent(Connection connection, UUID conversationId, int limit)
             throws SQLException {
         if (limit < 1 || limit > 100) {
