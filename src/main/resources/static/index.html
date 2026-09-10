@@ -12,6 +12,7 @@
     <h1>学习策略助手</h1>
     <div class="header-actions">
         <button id="newConversation" class="ghost-btn">新会话</button>
+        <button id="showHistory" class="ghost-btn" title="看看推荐过的方法，反馈实际效果">我试过的</button>
         <button id="toggleProfile" class="ghost-btn" title="查看我的画像">我的画像</button>
     </div>
 </header>
@@ -28,6 +29,19 @@
         </form>
         <div id="status"></div>
     </main>
+    <section id="historyView" class="hidden">
+        <div class="history-bar">
+            <h2>推荐过的方法</h2>
+            <div class="history-tabs" role="tablist">
+                <button type="button" id="tabByMethod" class="tab active" role="tab">按方法</button>
+                <button type="button" id="tabByTime" class="tab" role="tab">按时间</button>
+            </div>
+            <button type="button" id="closeHistory" class="ghost-btn">返回对话</button>
+        </div>
+        <p class="history-hint">这里的反馈是升降推荐度的唯一依据。卡片上的 👍 只会告诉投稿者“有人觉得不错”，不会影响推荐排序。</p>
+        <div id="historyList"></div>
+        <div id="historyStatus"></div>
+    </section>
     <aside id="profilePanel">
         <h2>我目前了解到的你</h2>
         <div id="profile"></div>

@@ -361,6 +361,295 @@ header h1 {
     color: #0d9488;
 }
 
+/* 卡片上的点赞与反馈入口 */
+.feedback-actions .like-btn {
+    padding: 3px 10px;
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+.feedback-actions .like-btn.chosen {
+    background: #e8f1ff;
+}
+
+/* 无边框的文字链接并靠右，和点赞按钮在视觉上分开：
+   一个是零摩擦的鼓励，一个是要填表的正式反馈，混在一起会被当成同一件事。 */
+.feedback-actions .trial-link {
+    border: none;
+    background: none;
+    padding: 0;
+    margin-left: auto;
+    color: #86909c;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.feedback-actions .trial-link:hover:not(:disabled) {
+    border: none;
+    color: #1d4ed8;
+}
+
+/* 推荐历史页 */
+#historyView {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    overflow-y: auto;
+    padding: 20px 24px 32px;
+}
+
+#historyView.hidden,
+#chat.hidden {
+    display: none;
+}
+
+.history-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.history-bar h2 {
+    font-size: 16px;
+    font-weight: 600;
+    color: #1d2129;
+    margin: 0;
+}
+
+.history-tabs {
+    display: flex;
+    gap: 4px;
+    background: #f2f3f5;
+    border-radius: 8px;
+    padding: 3px;
+}
+
+.history-tabs .tab {
+    border: none;
+    background: none;
+    padding: 4px 14px;
+    border-radius: 6px;
+    font-size: 13px;
+    color: #4e5969;
+    cursor: pointer;
+}
+
+.history-tabs .tab.active {
+    background: #fff;
+    color: #1d4ed8;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.history-bar .ghost-btn {
+    margin-left: auto;
+}
+
+.history-hint {
+    font-size: 12px;
+    color: #86909c;
+    line-height: 1.6;
+    margin: 0 0 16px;
+}
+
+#historyStatus {
+    font-size: 12px;
+    color: #0d9488;
+    min-height: 18px;
+    margin-top: 8px;
+}
+
+.history-empty {
+    color: #86909c;
+    font-size: 14px;
+    padding: 40px 0;
+    text-align: center;
+}
+
+.history-card {
+    border: 1px solid #e5e6eb;
+    border-radius: 12px;
+    background: #fff;
+    padding: 16px 18px;
+    margin-bottom: 14px;
+    transition: box-shadow 0.3s ease, border-color 0.3s ease;
+}
+
+.history-card.highlight {
+    border-color: #1d4ed8;
+    box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.12);
+}
+
+.history-card-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.history-card-head h3 {
+    font-size: 15px;
+    font-weight: 600;
+    color: #1d2129;
+    margin: 0;
+}
+
+.liked-mark {
+    font-size: 12px;
+    color: #1d4ed8;
+    background: #e8f1ff;
+    border-radius: 10px;
+    padding: 2px 8px;
+}
+
+.history-card .reason {
+    font-size: 13px;
+    color: #4e5969;
+    line-height: 1.7;
+    margin: 0 0 8px;
+}
+
+.history-card ol {
+    margin: 0 0 10px;
+    padding-left: 20px;
+    font-size: 13px;
+    color: #4e5969;
+    line-height: 1.8;
+}
+
+.history-card .meta {
+    font-size: 12px;
+    color: #86909c;
+    margin: 0;
+}
+
+/* 按时间流水视图 */
+.history-time-group {
+    border-left: 2px solid #e5e6eb;
+    padding: 0 0 16px 14px;
+}
+
+.history-time {
+    font-size: 12px;
+    color: #86909c;
+    margin-bottom: 6px;
+}
+
+.history-answer {
+    font-size: 13px;
+    color: #4e5969;
+    line-height: 1.7;
+    margin: 0 0 8px;
+}
+
+.history-time-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    border: 1px solid #e5e6eb;
+    background: #fbfcfe;
+    border-radius: 8px;
+    padding: 8px 12px;
+    margin-bottom: 6px;
+    font-size: 13px;
+    color: #1d2129;
+    cursor: pointer;
+}
+
+.history-time-item:hover {
+    border-color: #1d4ed8;
+    color: #1d4ed8;
+}
+
+/* 尝试后反馈表单 */
+.trial-form {
+    border-top: 1px dashed #e5e6eb;
+    margin-top: 12px;
+    padding-top: 12px;
+}
+
+.trial-title {
+    font-size: 13px;
+    color: #1d2129;
+    margin-bottom: 8px;
+}
+
+.trial-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.trial-row.hidden {
+    display: none;
+}
+
+.trial-row button {
+    border: 1px solid #e5e6eb;
+    background: #fff;
+    color: #4e5969;
+    padding: 5px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.trial-row button:hover {
+    border-color: #1d4ed8;
+    color: #1d4ed8;
+}
+
+.trial-row button.chosen {
+    border-color: #1d4ed8;
+    color: #1d4ed8;
+    background: #e8f1ff;
+}
+
+.trial-note {
+    width: 100%;
+    box-sizing: border-box;
+    border: 1px solid #e5e6eb;
+    border-radius: 8px;
+    padding: 8px 10px;
+    margin-bottom: 10px;
+    font-size: 13px;
+    font-family: inherit;
+    color: #1d2129;
+    resize: vertical;
+}
+
+.trial-note:focus {
+    outline: none;
+    border-color: #1d4ed8;
+}
+
+.trial-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.trial-submit {
+    border: none;
+    background: #1d4ed8;
+    color: #fff;
+    padding: 6px 18px;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.trial-submit:hover:not(:disabled) {
+    background: #1e40af;
+}
+
+.trial-submit:disabled {
+    background: #a9aeb8;
+    cursor: default;
+}
+
 /* 输入区 */
 #composer {
     display: flex;

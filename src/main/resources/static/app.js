@@ -20,6 +20,18 @@ const EXAMPLE_QUESTIONS = [
     "专业概念看不懂，看完教材也不知道在讲什么"
 ];
 
+const OUTCOME_LABELS = {
+    helpful: "很有用",
+    partial: "有点用",
+    not_helpful: "没什么用",
+    not_suitable: "不适合我的情况",
+    no_time: "还没时间试"
+};
+
+// tried 与 outcome 必须自洽，后端和数据库都有同样的约束。
+const TRIED_OUTCOMES = ["helpful", "partial", "not_helpful"];
+const NOT_TRIED_OUTCOMES = ["not_suitable", "no_time"];
+
 let accessCode = localStorage.getItem("accessCode") || "";
 let externalId = localStorage.getItem("externalId");
 if (!externalId) {
@@ -28,6 +40,8 @@ if (!externalId) {
 }
 let conversationId = null;
 let sending = false;
+let historyEvents = [];
+let historyViewMode = "method";
 
 const elements = {
     toggleSidebar: document.getElementById("toggleSidebar"),
@@ -41,7 +55,15 @@ const elements = {
     input: document.getElementById("input"),
     send: document.getElementById("send"),
     status: document.getElementById("status"),
-    profile: document.getElementById("profile")
+    profile: document.getElementById("profile"),
+    chat: document.getElementById("chat"),
+    showHistory: document.getElementById("showHistory"),
+    historyView: document.getElementById("historyView"),
+    historyList: document.getElementById("historyList"),
+    tabByMethod: document.getElementById("tabByMethod"),
+    tabByTime: document.getElementById("tabByTime"),
+    closeHistory: document.getElementById("closeHistory"),
+    historyStatus: document.getElementById("historyStatus")
 };
 
 function apiUrl(path) {
@@ -76,8 +98,10 @@ async function http(method, path, body) {
     return response.json();
 }
 
+/** 历史页打开时对话区是隐藏的，所以状态提示要同时写到两处。 */
 function showStatus(text) {
     elements.status.textContent = text || "";
+    elements.historyStatus.textContent = text || "";
 }
 
 async function loadConversations() {
@@ -194,7 +218,8 @@ function renderMessage(message) {
         (message.metadata && message.metadata.messageType === "recommendation"
             ? message.metadata.recommendation : null);
     if (recommendation) {
-        bubble.appendChild(renderRecommendation(recommendation, message.messageId || null));
+        bubble.appendChild(renderRecommendation(
+            recommendation, message.messageId || null, message.likedStrategies || []));
     }
 
     row.appendChild(body);
@@ -211,7 +236,7 @@ function renderTyping() {
     return row;
 }
 
-function renderRecommendation(result, messageId) {
+function renderRecommendation(result, messageId, likedStrategies) {
     const card = document.createElement("div");
     card.className = "recommendation-card";
 
@@ -257,7 +282,9 @@ function renderRecommendation(result, messageId) {
         block.appendChild(meta);
 
         if (messageId) {
-            block.appendChild(renderFeedbackActions(messageId, recommendation.strategyId));
+            block.appendChild(renderFeedbackActions(
+                messageId, recommendation.strategyId,
+                (likedStrategies || []).includes(recommendation.strategyId)));
         }
 
         card.appendChild(block);
@@ -273,30 +300,48 @@ function renderRecommendation(result, messageId) {
     return card;
 }
 
-function renderFeedbackActions(messageId, strategyId) {
+/**
+ * 卡片上只保留单向点赞和一个跳转入口。
+ * 不做「不感兴趣」是因为随手点踩会让好方法仅因为被推给了不合适的人而降权；
+ * 真正的效果反馈必须走历史页，那里有上下文，用户是主动填写的。
+ */
+function renderFeedbackActions(messageId, strategyId, liked) {
     const actions = document.createElement("div");
     actions.className = "feedback-actions";
-    actions.appendChild(feedbackButton("采纳", messageId, strategyId, "adopted"));
-    actions.appendChild(feedbackButton("不感兴趣", messageId, strategyId, "dismissed"));
+    actions.appendChild(likeButton(messageId, strategyId, liked));
+
+    const link = document.createElement("button");
+    link.type = "button";
+    link.className = "trial-link";
+    link.textContent = "试过这个方法了？告诉我们效果 →";
+    link.addEventListener("click", () => openHistory(strategyId));
+    actions.appendChild(link);
     return actions;
 }
 
-function feedbackButton(label, messageId, strategyId, action) {
+/**
+ * 点赞只能给不能取消，因此已点赞的按钮直接置为 disabled。
+ * 这是个有意识的取舍：点赞只展示给投稿者、不参与任何权重计算，
+ * 误点的代价极低，不值得为它多做一个 DELETE 接口。
+ */
+function likeButton(messageId, strategyId, liked) {
     const button = document.createElement("button");
     button.type = "button";
-    button.textContent = label;
+    button.className = "like-btn";
+    button.textContent = "👍";
+    button.title = "觉得这个方法不错，让投稿者知道";
+    button.setAttribute("aria-label", "点赞");
+    if (liked) {
+        button.classList.add("chosen");
+        button.disabled = true;
+    }
     button.addEventListener("click", async () => {
-        const container = button.parentElement;
-        container.querySelectorAll("button").forEach(item => item.disabled = true);
+        button.disabled = true;
         try {
-            await http("POST", `/messages/${messageId}/feedback`, { strategyId, action });
+            await http("POST", `/messages/${messageId}/feedback`, { strategyId, action: "liked" });
             button.classList.add("chosen");
-            const note = document.createElement("span");
-            note.className = "feedback-note";
-            note.textContent = "已记录";
-            container.appendChild(note);
         } catch (error) {
-            container.querySelectorAll("button").forEach(item => item.disabled = false);
+            button.disabled = false;
             showStatus(error.message);
         }
     });
@@ -347,6 +392,299 @@ function renderProfile(profile) {
 
         elements.profile.appendChild(item);
     });
+}
+
+/* ---------- 推荐历史与尝试后反馈 ---------- */
+
+/**
+ * 打开历史页。focusStrategyId 不为空时自动定位到该方法的卡片，
+ * 用于推荐卡片上「试过这个方法了？」的跳转。
+ */
+async function openHistory(focusStrategyId) {
+    elements.chat.classList.add("hidden");
+    elements.historyView.classList.remove("hidden");
+    showStatus("");
+    try {
+        historyEvents = await http("GET", "/recommendation-history");
+        renderHistory();
+        if (focusStrategyId) focusMethod(focusStrategyId);
+    } catch (error) {
+        showStatus(error.message);
+    }
+}
+
+function closeHistory() {
+    elements.historyView.classList.add("hidden");
+    elements.chat.classList.remove("hidden");
+}
+
+function switchHistoryView(mode) {
+    historyViewMode = mode;
+    elements.tabByMethod.classList.toggle("active", mode === "method");
+    elements.tabByTime.classList.toggle("active", mode === "time");
+    renderHistory();
+}
+
+function renderHistory() {
+    elements.historyList.innerHTML = "";
+    if (historyEvents.length === 0) {
+        const empty = document.createElement("p");
+        empty.className = "history-empty";
+        empty.textContent = "还没有推荐过方法。先去聊聊你在学什么、遇到了什么困难。";
+        elements.historyList.appendChild(empty);
+        return;
+    }
+    if (historyViewMode === "method") renderByMethod();
+    else renderByTime();
+}
+
+/**
+ * 按方法聚合。一个人对一个方法只有一个真实体验，不该因为被推荐三次就填三次反馈，
+ * 所以反馈绑定 (user, strategy) 而不是 (message, strategy)。
+ * historyEvents 已按时间倒序，首次遇到某个方法时的时间就是最近一次推荐时间。
+ */
+function renderByMethod() {
+    const grouped = new Map();
+    historyEvents.forEach(event => {
+        (event.methods || []).forEach(method => {
+            const existing = grouped.get(method.strategyId);
+            if (existing) {
+                existing.count += 1;
+                existing.liked = existing.liked || method.liked;
+            } else {
+                grouped.set(method.strategyId, {
+                    method,
+                    count: 1,
+                    liked: method.liked,
+                    latest: event.recommendedAt,
+                    latestMessageId: event.messageId
+                });
+            }
+        });
+    });
+
+    grouped.forEach(entry => {
+        const card = document.createElement("div");
+        card.className = "history-card";
+        card.dataset.strategyId = entry.method.strategyId;
+
+        const head = document.createElement("div");
+        head.className = "history-card-head";
+        const name = document.createElement("h3");
+        name.textContent = entry.method.strategyName || entry.method.strategyId;
+        head.appendChild(name);
+        if (entry.liked) {
+            const mark = document.createElement("span");
+            mark.className = "liked-mark";
+            mark.textContent = "👍 已赞";
+            head.appendChild(mark);
+        }
+        card.appendChild(head);
+
+        if (entry.method.reason) {
+            const reason = document.createElement("p");
+            reason.className = "reason";
+            reason.textContent = entry.method.reason;
+            card.appendChild(reason);
+        }
+
+        if (entry.method.methodSteps && entry.method.methodSteps.length > 0) {
+            const steps = document.createElement("ol");
+            entry.method.methodSteps.forEach(step => {
+                const item = document.createElement("li");
+                item.textContent = step;
+                steps.appendChild(item);
+            });
+            card.appendChild(steps);
+        }
+
+        const meta = document.createElement("p");
+        meta.className = "meta";
+        const parts = ["推荐过 " + entry.count + " 次，最近 " + formatTime(entry.latest)];
+        if (entry.method.sourceIds && entry.method.sourceIds.length > 0) {
+            parts.push("来源 " + entry.method.sourceIds.join("、"));
+        }
+        meta.textContent = parts.join("　·　");
+        card.appendChild(meta);
+
+        card.appendChild(renderTrialForm(entry.method, entry.latestMessageId));
+        elements.historyList.appendChild(card);
+    });
+}
+
+/** 按时间流水。点任一方法跳到「按方法」视图对应卡片去填反馈。 */
+function renderByTime() {
+    historyEvents.forEach(event => {
+        const group = document.createElement("div");
+        group.className = "history-time-group";
+
+        const when = document.createElement("div");
+        when.className = "history-time";
+        when.textContent = formatTime(event.recommendedAt);
+        group.appendChild(when);
+
+        if (event.answer) {
+            const answer = document.createElement("p");
+            answer.className = "history-answer";
+            answer.textContent = event.answer;
+            group.appendChild(answer);
+        }
+
+        (event.methods || []).forEach(method => {
+            const item = document.createElement("button");
+            item.type = "button";
+            item.className = "history-time-item";
+            const marks = [];
+            if (method.liked) marks.push("👍");
+            if (method.trial) marks.push("已反馈：" + OUTCOME_LABELS[method.trial.outcome]);
+            item.textContent = (method.strategyName || method.strategyId)
+                + (marks.length > 0 ? "　" + marks.join("　") : "");
+            item.addEventListener("click", () => {
+                switchHistoryView("method");
+                focusMethod(method.strategyId);
+            });
+            group.appendChild(item);
+        });
+
+        elements.historyList.appendChild(group);
+    });
+}
+
+/**
+ * 尝试后反馈表单。两级选择：先问试没试，再按选择给出互斥的效果选项。
+ * 没试过时的「不适合我的情况」不参与降权，它是适合人群预测模型最有价值的负样本。
+ */
+function renderTrialForm(method, sourceMessageId) {
+    const form = document.createElement("div");
+    form.className = "trial-form";
+
+    const title = document.createElement("div");
+    title.className = "trial-title";
+    title.textContent = method.trial ? "你的反馈（可随时修改）" : "你试过这个方法吗？";
+    form.appendChild(title);
+
+    const state = {
+        tried: method.trial ? method.trial.tried : null,
+        outcome: method.trial ? method.trial.outcome : null
+    };
+
+    const triedRow = document.createElement("div");
+    triedRow.className = "trial-row";
+    const outcomeRow = document.createElement("div");
+    outcomeRow.className = "trial-row hidden";
+
+    function buildOutcomeOptions() {
+        outcomeRow.innerHTML = "";
+        const options = state.tried ? TRIED_OUTCOMES : NOT_TRIED_OUTCOMES;
+        options.forEach(outcome => {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.textContent = OUTCOME_LABELS[outcome];
+            if (state.outcome === outcome) button.classList.add("chosen");
+            button.addEventListener("click", () => {
+                state.outcome = outcome;
+                outcomeRow.querySelectorAll("button")
+                    .forEach(item => item.classList.remove("chosen"));
+                button.classList.add("chosen");
+            });
+            outcomeRow.appendChild(button);
+        });
+    }
+
+    [["试过了", true], ["还没试", false]].forEach(pair => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = pair[0];
+        if (state.tried === pair[1]) button.classList.add("chosen");
+        button.addEventListener("click", () => {
+            state.tried = pair[1];
+            // 切换试没试之后原来的效果选项不再自洽，必须清空重选。
+            state.outcome = null;
+            triedRow.querySelectorAll("button").forEach(item => item.classList.remove("chosen"));
+            button.classList.add("chosen");
+            buildOutcomeOptions();
+            outcomeRow.classList.remove("hidden");
+        });
+        triedRow.appendChild(button);
+    });
+    form.appendChild(triedRow);
+
+    if (state.tried !== null) {
+        buildOutcomeOptions();
+        outcomeRow.classList.remove("hidden");
+    }
+    form.appendChild(outcomeRow);
+
+    const note = document.createElement("textarea");
+    note.className = "trial-note";
+    note.rows = 2;
+    note.maxLength = 2000;
+    note.placeholder = "想补充点什么吗？比如你具体是怎么用的、卡在哪一步（可选）";
+    note.value = method.trial && method.trial.note ? method.trial.note : "";
+    form.appendChild(note);
+
+    const savedNote = document.createElement("span");
+    savedNote.className = "feedback-note";
+    if (method.trial) {
+        savedNote.textContent = "已反馈：" + OUTCOME_LABELS[method.trial.outcome]
+            + "（" + formatTime(method.trial.updatedAt) + "）";
+    }
+
+    const submit = document.createElement("button");
+    submit.type = "button";
+    submit.className = "trial-submit";
+    submit.textContent = "保存反馈";
+    submit.addEventListener("click", async () => {
+        if (state.tried === null) {
+            showStatus("先选一下有没有试过");
+            return;
+        }
+        if (!state.outcome) {
+            showStatus("再选一个具体情况");
+            return;
+        }
+        submit.disabled = true;
+        try {
+            const result = await http("POST",
+                `/strategies/${encodeURIComponent(method.strategyId)}/trial-feedback`, {
+                    tried: state.tried,
+                    outcome: state.outcome,
+                    note: note.value.trim() || null,
+                    sourceMessageId: sourceMessageId || null
+                });
+            method.trial = result;
+            savedNote.textContent = "已反馈：" + OUTCOME_LABELS[result.outcome]
+                + "（" + formatTime(result.updatedAt) + "）";
+            showStatus("反馈已记录，谢谢你");
+        } catch (error) {
+            showStatus(error.message);
+        } finally {
+            submit.disabled = false;
+        }
+    });
+
+    const actions = document.createElement("div");
+    actions.className = "trial-actions";
+    actions.appendChild(submit);
+    actions.appendChild(savedNote);
+    form.appendChild(actions);
+
+    return form;
+}
+
+function focusMethod(strategyId) {
+    const card = elements.historyList.querySelector(
+        '.history-card[data-strategy-id="' + CSS.escape(strategyId) + '"]');
+    if (!card) return;
+    card.scrollIntoView({ behavior: "smooth", block: "center" });
+    card.classList.add("highlight");
+    setTimeout(() => card.classList.remove("highlight"), 1600);
+}
+
+function formatTime(value) {
+    if (!value) return "";
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString("zh-CN");
 }
 
 function showAccessGate() {
@@ -452,6 +790,10 @@ elements.toggleProfile.addEventListener("click", () => {
     loadProfile();
 });
 elements.newConversation.addEventListener("click", startConversation);
+elements.showHistory.addEventListener("click", () => openHistory(null));
+elements.closeHistory.addEventListener("click", closeHistory);
+elements.tabByMethod.addEventListener("click", () => switchHistoryView("method"));
+elements.tabByTime.addEventListener("click", () => switchHistoryView("time"));
 elements.composer.addEventListener("submit", sendMessage);
 elements.input.addEventListener("input", autoResize);
 elements.input.addEventListener("keydown", event => {

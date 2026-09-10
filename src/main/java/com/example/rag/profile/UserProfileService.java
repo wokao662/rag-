@@ -1,6 +1,7 @@
 package com.example.rag.profile;
 
 import com.example.rag.observability.ModelCallLogger;
+import com.example.rag.recommendation.FeedbackRepository;
 import com.example.rag.recommendation.RecommendationService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -19,6 +20,7 @@ import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -40,6 +42,7 @@ public class UserProfileService {
     private final ConversationRepository conversations = new ConversationRepository();
     private final MessageRepository messages = new MessageRepository();
     private final UserProfileRepository profiles = new UserProfileRepository();
+    private final FeedbackRepository feedback = new FeedbackRepository();
 
     public UserProfileService(
             DataSource dataSource,
@@ -179,10 +182,13 @@ public class UserProfileService {
         return inTransaction(connection -> {
             UUID userId = requireUser(connection, normalizedId);
             requireConversationOwnership(connection, conversationId, userId);
+            // 带上点赞状态，否则刷新页面后推荐卡片上的 👍 会回到未选中，用户看不出自己点过。
+            Map<UUID, Set<String>> likes = feedback.findLikesByUser(connection, userId);
             return messages.findRecent(connection, conversationId, 100).stream()
                     .map(message -> new MessageView(
                             message.id(), message.role(), message.content(),
-                            toMap(message.metadata()), message.createdAt().toString()))
+                            toMap(message.metadata()), message.createdAt().toString(),
+                            List.copyOf(likes.getOrDefault(message.id(), Set.of()))))
                     .toList();
         });
     }
@@ -313,7 +319,8 @@ public class UserProfileService {
             String role,
             String content,
             Map<String, Object> metadata,
-            String createdAt
+            String createdAt,
+            List<String> likedStrategies
     ) {
     }
 

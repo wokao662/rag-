@@ -288,6 +288,46 @@ Invoke-RestMethod `
 
 用户还没有画像时调用推荐接口返回 404；Qdrant、Embedding 或聊天模型不可用时返回 502，画像对话流程不受影响。
 
+### 推荐历史与尝试后反馈 API（开发版）
+
+反馈分两条通道，职责互不重叠：
+
+| 通道 | 写入表 | 作用 | 是否影响推荐度 |
+| --- | --- | --- | --- |
+| 卡片上的 👍 | `recommendation_feedback` | 只汇总给方法投稿者看，告诉他“有人觉得不错” | 否 |
+| 历史页的尝试后反馈 | `method_trial_feedback` | 驱动 `triedCount` / `helpfulCount` / `communityScore` 与渐进投放的升降权 | 是（唯一依据） |
+
+取消卡片上的“不感兴趣”是有意的：随手点踩会让好方法仅因为被推给了不合适的人而降权。负面判断改由历史页的 `not_suitable` 承载，那是用户在有上下文时主动填写的，质量高得多，同时也是“适合人群预测”最有价值的负样本。
+
+读取该用户历史上收到过的全部推荐（按时间倒序，跨会话）：
+
+```powershell
+Invoke-RestMethod `
+  -Uri http://127.0.0.1:8080/api/v1/users/web-user-001/recommendation-history
+```
+
+历史内容取自推荐当时序列化进 `messages.metadata_json` 的快照，因此即使某个方法后来被降权归档，历史页仍能显示当初推荐了什么。每条方法额外带 `liked` 与 `trial` 两个当前状态字段，用于刷新页面后恢复界面。
+
+提交或修改对某个方法的尝试后反馈：
+
+```powershell
+$body = @{ tried = $true; outcome = "helpful"; note = "分散到三天后确实记住了" } | ConvertTo-Json
+Invoke-RestMethod `
+  -Method Post `
+  -ContentType "application/json; charset=utf-8" `
+  -Uri "http://127.0.0.1:8080/api/v1/users/web-user-001/strategies/strategy-keyword-mnemonic/trial-feedback" `
+  -Body $body
+```
+
+`tried` 与 `outcome` 必须自洽，数据库和 Java 层有同样的约束：
+
+- `tried=true`（试过了）：`helpful`（很有用）、`partial`（有点用）、`not_helpful`（没什么用）
+- `tried=false`（没试）：`not_suitable`（不适合我的情况）、`no_time`（还没时间试）
+
+`note` 选填，最长 2000 字。同一用户对同一方法只保留一条记录（`UNIQUE (user_id, strategy_id)`），重复提交视为修改自己之前的反馈，`updated_at` 随之刷新。反馈绑定 `(user, strategy)` 而不是 `(message, strategy)`，因为一个人对一个方法只有一段真实体验，不该因为被推荐三次就填三次。
+
+对系统没有推荐过的方法提交反馈返回 404；`tried` 与 `outcome` 矛盾、`outcome` 未知或缺字段返回 400。少了这道校验，任何人都能凭空对任意 `strategyId` 提交反馈，直接污染驱动升降权的统计数据。
+
 ### Web 聊天界面（开发版）
 
 启动后端后直接在浏览器打开：
@@ -303,10 +343,10 @@ http://127.0.0.1:8080/
 - 聊天窗口发送消息后，画像不足时显示助手的追问（带“正在输入”状态），画像充足时自动展示推荐卡片（策略名称、具体步骤、推荐理由、注意事项和来源）。
 - 右上角“我的画像”抽屉展示当前画像，每个字段附用户原话引用（画像只能由系统根据对话更新，不提供手动编辑）。
 - 左上角可展开历史会话抽屉，会话以首条消息摘要为标题，点击可回看完整消息记录。
-- 推荐卡片中的每个策略带“采纳 / 不感兴趣”反馈按钮，点击后写入 `recommendation_feedback` 表，同一推荐同一策略只保留最新一次反馈。反馈接口：
+- 推荐卡片中的每个策略带一个 👍 按钮和右侧的“试过这个方法了？告诉我们效果 →”入口。点赞只能给不能取消，已点赞的按钮置灰；点击入口跳转到“我试过的”页面并自动定位到该方法。点赞接口：
 
 ```powershell
-$body = @{ strategyId = "strategy-keyword-mnemonic"; action = "adopted" } | ConvertTo-Json
+$body = @{ strategyId = "strategy-keyword-mnemonic"; action = "liked" } | ConvertTo-Json
 Invoke-RestMethod `
   -Method Post `
   -ContentType "application/json; charset=utf-8" `
@@ -314,7 +354,9 @@ Invoke-RestMethod `
   -Body $body
 ```
 
-`action` 只能是 `adopted` 或 `dismissed`；消息必须属于该用户的会话，否则返回 404。推荐消息 ID 来自消息接口响应的 `assistantMessageId`，或消息历史接口的 `messageId`。
+`action` 只能是 `liked`（`adopted` / `dismissed` 已退役，旧客户端提交返回 400）；消息必须属于该用户的会话，否则返回 404。推荐消息 ID 来自消息接口响应的 `assistantMessageId`，或消息历史接口的 `messageId`。
+
+- 顶部“我试过的”打开推荐历史页，提供两种视图供用户自选：**按方法**（同一方法的多次推荐聚合成一张卡片，显示被推荐次数与最近一次时间）和**按时间**（一条推荐一张卡片，还原当时的推荐组合）。切换视图不重新请求，两个视图共用同一份接口数据。每张卡片内嵌尝试后反馈表单：先问试没试，再按选择给出互斥的效果选项，切换“试没试”会清空已选效果，避免留下不自洽的组合。
 
 ### 访问码（测试期）
 
