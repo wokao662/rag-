@@ -328,6 +328,60 @@ Invoke-RestMethod `
 
 对系统没有推荐过的方法提交反馈返回 404；`tried` 与 `outcome` 矛盾、`outcome` 未知或缺字段返回 400。少了这道校验，任何人都能凭空对任意 `strategyId` 提交反馈，直接污染驱动升降权的统计数据。
 
+### 策略存储层
+
+`data/strategies/*.json` 是策略档案的权威来源，但 JSON 文件承载不了审核队列、并发投稿和事务，`reviewStatus` 写在里面也只是记录、不是闸门。V6 迁移把它们镜像进 PostgreSQL：
+
+| 表 | 内容 |
+| --- | --- |
+| `strategies` | 策略档案 + 推荐分字段 + 审核与投放状态 |
+| `sources` | 来源。`kind` 区分 `literature` / `user_submission` / `web` / `other`：`generate_strategy_chunks.py` 硬校验 `sourceIds` 非空，用户投稿没有权威文献，需要 `user_submission` 类来源才能入库 |
+| `strategy_chunks` | Qdrant 中 chunk 的数据库镜像，`chunk_id` 与 JSONL 里的 uuid5 一致，重复导入走 upsert |
+| `strategy_exposures` | 曝光去重表。同一用户对同一策略只计一次，否则重复推荐会把人数上限刷爆 |
+
+导入是幂等的，改完档案可以直接重跑：
+
+```powershell
+mvn compile exec:java "-Dexec.mainClass=com.example.rag.cli.StrategyImporter" "-Dexec.classpathScope=runtime"
+```
+
+导入器只写内容与两个输入分（`evidence_score` / `effectiveness_score`），而且只在 `review_status = 'draft'` 时覆盖它们——人工审核过后档案不再是评分的权威，重新导入不会把审核结果冲掉。档案里的 `communityScore` 一律不导入：`triedCount = 0` 时那个数字没有任何数据支撑。
+
+`community_score` / `overall_score` / `tried_count` / `helpful_count` / `exposed_user_count` / `exposure_state` / `pending_archive` 全是派生值，唯一写入者是 `StrategyGovernanceService`，应用启动时从 `method_trial_feedback` 与 `strategy_exposures` 整体重建一次。公式只存在这一处，导入器和人工改分都不自己算，避免同一个公式被复制成两份而逐渐走偏。
+
+`reviewer_score` 单独存放审核者的判断：它与合成分的差值是模型二的核心训练标签，共用 `overall_score` 会被互相覆盖而毁掉标签。
+
+### 推荐闸门与渐进投放
+
+闸门位于召回之后、按策略补齐 chunk 之前：被挡下的策略连它的其他 chunk 也不会被送给模型。
+
+`app.governance.review-gate`（环境变量 `GOVERNANCE_REVIEW_GATE`，默认 `false`）决定审核相关的两条规则是否生效：
+
+| 拦截条件 | `false` | `true` |
+| --- | --- | --- |
+| `archive_missing`：在 Qdrant 对外服务却没有源档案，无溯源可查 | 生效 | 生效 |
+| `pending_archive`：足够多真实用户试过且有用率过低 | 生效 | 生效 |
+| `exposure_state = 'paused'`：人工暂停 | 生效 | 生效 |
+| `review_status != 'approved'` | 不生效 | 生效 |
+| 曝光人数达到当前档位上限 | 不生效 | 生效 |
+
+默认关闭是因为现存 13 个策略档案全是 `draft`，直接开启会把推荐过滤成全空。但前三条拦截与审核无关，所以飞轮在人工审核完成之前就开始转：无溯源的和已被真实反馈证伪的照样挡下，曝光计数、社区分与合成总分照常累计。审核完成、把通过的策略置为 `approved` 之后改成 `true`。
+
+闸门查询失败时保守处理：挡下全部候选（宁可这次不推荐，也不能把未审核内容当作已审核推给用户）。曝光记录失败则不阻断推荐——推荐已经生成，不能因为记账写不进去就把它丢掉，计数偏差下一次推荐就会补上。两条路径都会打完整异常栈：外层包装只有一句“数据库操作失败”，真正的 SQL 错误在 `cause` 里。
+
+排查“推荐突然变空”时看 `model_call_logs.input_json` 里的 `gateFilteredOut`，它记录本次被闸门挡下的候选数。
+
+### 升降权规则
+
+只用确定性规则，不引入学习型排序模型，因此可解释、可审计：
+
+- 社区分 = 有用率的 Wilson 95% 置信**下界**，不是点估计。1 个人说有用点估计是 100%，下界会把它拉回保守值（约 0.21）。
+- 少于 10 条尝试反馈不动社区分：小样本抖动太大，会误杀或误捧一个方法。
+- 只有 `helpful` 计入有用，`partial` 不算，保持保守。
+- 合成总分 = 0.3 × 文献证据 + 0.5 × 社区反馈 + 0.2 × 有效性。
+- 投放档位 `seed`（20 人）→ `scaling`（`exposure_cap`，默认 50）→ `full`。升档要同时满足人数达标与社区分 ≥ 0.5，否则留在原档继续收集反馈。
+- 社区分 < 0.3 且样本足够时标记 `pending_archive`。**只标记不删除**，归档须人审确认。
+
 ### Web 聊天界面（开发版）
 
 启动后端后直接在浏览器打开：
@@ -377,6 +431,44 @@ docker exec rag-postgres psql -U learning_app -d learning_app -c "INSERT INTO ac
 ```powershell
 docker exec rag-postgres psql -U learning_app -d learning_app -c "SELECT task_type, status, latency_ms, created_at FROM model_call_logs ORDER BY created_at DESC LIMIT 10;"
 ```
+
+#### 写入前脱敏
+
+这张表是全项目最大的隐私暴露面：`extract` 任务的 `input_json.currentUserMessage` 存的是用户逐字说过的原话。脱敏放在写入的唯一入口 `ModelCallLogger`，不靠调用方自觉——只要有人新增一处日志调用，忘了脱敏就是真的泄露。
+
+替换成占位符而不是直接丢弃，因为句子结构对训练有价值，而直接标识符本来就是噪声，脱敏与训练质量是同向的。按顺序匹配（长的先匹，否则 18 位身份证会被当成卡号或长数字串）：
+
+| 类型 | 占位符 |
+| --- | --- |
+| 18 位身份证（含末位 X） | `[证件号]` |
+| 16–19 位银行卡号 | `[卡号]` |
+| 11 位手机号 | `[手机号]` |
+| 邮箱 | `[邮箱]` |
+| 8 位以上连续数字（学号、工号、QQ 号） | `[数字串]` |
+
+学习相关的短数字（每天 60 分钟、一周 3 次、背了 3000 个单词、坚持 21 天）必须完整保留，它们正是画像要抽的字段值，误伤就等于毁掉训练数据。脱敏返回深拷贝，不改入参：调用方记完日志还要继续用原对象做校验与合并，原地修改会把占位符带进画像。`messages.content` 也不受影响，用户自己的消息历史保留原文。
+
+姓名、学校、住址这类没有固定格式的信息正则处理不了，**没有假装已解决**，只能靠下面的保留期兜住。
+
+#### 保留期
+
+```dotenv
+LOG_RETENTION_DAYS=365
+```
+
+`app.logs.retention-days` 默认 365 天，设为 0 或负数关闭自动清理。启动时清一次，之后按 `app.logs.purge-cron`（默认每天 03:30）定时清。不按 `status` 区分保留期：`fallback` 与 `failed` 是最有价值的难样本，提前删掉等于专挑有用的数据丢。`user_id` 外键是 `ON DELETE SET NULL`，删用户会自动把它的日志匿名化。
+
+### 行为观测（只采集，不喂模型）
+
+`behavior_observations` 存的是由确定性代码从本库已有数据算出的聚合信号，为用户自述提供客观对照：自述“我每天都在学”对上近 7 天实际活跃天数，自述“我试过那个方法”对上真的提交过尝试后反馈的方法数。无意识失真在对话内部往往完全自洽，只有与行为对照才显形。
+
+指标：`user_messages`（全量 / 7 天 / 30 天）、`active_days`（7 / 30 天）、`conversation_span_days`、`recommendations_received`、`recommended_strategies`、`trial_feedback_given`、`methods_tried`，以及两个比率 `trial_follow_through_rate` 与 `helpful_rate`。`window_days = 0` 表示不设窗口；指标名与窗口一起构成主键，重算走 upsert，不堆历史。
+
+两个比率的分子分母量级必须一致：`method_trial_feedback` 有 `UNIQUE (user_id, strategy_id)`，反馈数天然是去重后的**方法数**，所以跟进率的分母用 `recommended_strategies`（被推荐过的不同方法数）而不是推荐**消息**数——一条消息里通常有好几个方法，拿消息数当分母会让“率”超过 1。
+
+重算时机是写入行为的事务提交之后（发完一条消息、提交完一次尝试后反馈），否则读到的是提交前的旧数据，观测值会永远慢一轮。采集失败一律只打印不抛出，任何情况下不能让对话或反馈提交失败。
+
+**隐私边界（2026-09-10 定）**：这张表的内容不进入任何模型输入，也不写入 `model_call_logs`。v1 的模型一只看对话相关内容（当前消息、历史画像、过往询问策略及结果）。采集与使用解耦：现在照采照存，目的只是将来评估“自述失真觉察”到底做不做得起来时手上有对照面，而不是等到那天才开始攒数据。真要接入模型一时，也只给这里已经聚合好的偏差信号，不给原始行为日志。用户对隐私敏感，采集范围必须小于使用范围时才敢长期留着。
 
 页面依赖的会话查询接口：
 

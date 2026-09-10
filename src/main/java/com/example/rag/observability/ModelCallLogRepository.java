@@ -59,4 +59,20 @@ public final class ModelCallLogRepository {
             statement.executeUpdate();
         }
     }
+
+    /**
+     * 删除超过保留期的日志，返回删除行数。
+     *
+     * <p>不按 status 区分保留期：{@code fallback} 与 {@code failed} 的行看起来像垃圾，
+     * 实际上它们是模型一最有价值的训练标签之一（模型搞不定的情形与本地兜底结果的对照），
+     * 提前删掉等于把难样本全扔了。隐私靠统一的保留期与写入前脱敏兼顾，不靠差别删除。
+     */
+    public int deleteOlderThan(Connection connection, int days) throws SQLException {
+        if (days <= 0) throw new IllegalArgumentException("保留天数必须大于 0，实际：" + days);
+        String sql = "DELETE FROM model_call_logs WHERE created_at < NOW() - make_interval(days => ?)";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, days);
+            return statement.executeUpdate();
+        }
+    }
 }

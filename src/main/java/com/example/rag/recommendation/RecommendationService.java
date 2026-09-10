@@ -108,7 +108,10 @@ public class RecommendationService {
             allowed = governance.recommendable(candidates);
         } catch (RuntimeException error) {
             // 闸门查不动时宁可保守：挡下全部候选，也不能把未审核内容当作已审核推给用户。
+            // 打整个栈：外层异常只有一句“数据库操作失败”，真正的 SQL 错误在 cause 里，
+            // 而这条路径失败会让推荐静默变空，不留栈就查不下去。
             System.err.println("策略闸门查询失败，本次不推荐任何策略：" + error.getMessage());
+            error.printStackTrace(System.err);
             return new JsonArray();
         }
         return admitByGate(hits, allowed);
@@ -129,6 +132,7 @@ public class RecommendationService {
             governance.recordExposure(userId, exposed);
         } catch (RuntimeException error) {
             System.err.println("记录策略曝光失败，不影响本次推荐：" + error.getMessage());
+            error.printStackTrace(System.err);
         }
     }
 

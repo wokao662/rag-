@@ -38,6 +38,7 @@ public class UserProfileService {
     private final ProfileReadinessPolicy readinessPolicy;
     private final RecommendationService recommendationService;
     private final ModelCallLogger callLogger;
+    private final BehaviorObservationService observations;
     private final UserRepository users = new UserRepository();
     private final ConversationRepository conversations = new ConversationRepository();
     private final MessageRepository messages = new MessageRepository();
@@ -54,7 +55,8 @@ public class UserProfileService {
             UserProfileMerger merger,
             ProfileReadinessPolicy readinessPolicy,
             RecommendationService recommendationService,
-            ModelCallLogger callLogger
+            ModelCallLogger callLogger,
+            BehaviorObservationService observations
     ) {
         this.dataSource = dataSource;
         this.transactions = transactions;
@@ -66,6 +68,7 @@ public class UserProfileService {
         this.readinessPolicy = readinessPolicy;
         this.recommendationService = recommendationService;
         this.callLogger = callLogger;
+        this.observations = observations;
     }
 
     public ConversationStarted startConversation(String externalId) {
@@ -145,6 +148,10 @@ public class UserProfileService {
             }
             return null;
         });
+
+        // 行为观测在事务提交之后重算，这一轮的消息与推荐才已经在库里。
+        // 采集失败不会抛到这里（服务内部已吃掉），对话不会因旁路数据而失败。
+        observations.refresh(context.userId());
 
         return new TurnResult(
                 decision.action(), decision.ready(), fallback.completeness(), decision.confidence(),

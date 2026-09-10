@@ -95,7 +95,7 @@ public class StrategyGovernanceService {
         });
     }
 
-    /** 记录一次推荐曝光，并顺带重算这几个策略的分数与投放档位（人数变化可能触发扩量）。 */
+    /** 记录一次推荐曝光，并顺带重算这几个策略的人数、分数与投放档位（人数变化可能触发扩量）。 */
     public void recordExposure(UUID userId, Collection<String> strategyIds) {
         if (strategyIds == null || strategyIds.isEmpty()) return;
         inTransaction(connection -> {
@@ -126,6 +126,8 @@ public class StrategyGovernanceService {
      * @param scope 限定重算范围；null 表示全部策略
      */
     private void recalculateWithin(Connection connection, Collection<String> scope) throws SQLException {
+        // 人数先重建再读快照：nextExposureState 要拿它跟档位上限比，读旧值会晚一轮才扩量。
+        governance.refreshExposedUserCounts(connection, scope);
         Map<String, StrategyGovernanceRepository.TrialStats> stats = governance.trialStats(connection, scope);
         Map<String, StrategyGovernanceRepository.ScoreRow> scores = governance.currentScores(connection, scope);
         Map<String, StrategyGovernanceRepository.GateRow> gates = governance.gateRows(connection, scope);

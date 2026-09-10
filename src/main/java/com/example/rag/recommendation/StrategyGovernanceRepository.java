@@ -46,7 +46,6 @@ public final class StrategyGovernanceRepository {
      */
     public Map<String, TrialStats> trialStats(Connection connection, Collection<String> strategyIds)
             throws SQLException {
-        String filter = inClause(strategyIds);
         String sql = """
                 SELECT strategy_id,
                        COUNT(*) FILTER (WHERE tried) AS tried_count,
@@ -54,7 +53,7 @@ public final class StrategyGovernanceRepository {
                 FROM method_trial_feedback
                 %s
                 GROUP BY strategy_id
-                """.formatted(filter);
+                """.formatted(whereIn(strategyIds));
         Map<String, TrialStats> stats = new HashMap<>();
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             bindIds(statement, strategyIds);
@@ -107,15 +106,17 @@ public final class StrategyGovernanceRepository {
                 result.getBoolean("archive_missing"));
     }
 
-    /** IN 子句的占位符串；范围为空时返回空串，即不加过滤。 */
-    private static String inClause(Collection<String> strategyIds) {
+    /**
+     * 范围过滤子句；范围为空时返回空串，即不加过滤（全表重算）。
+     *
+     * <p>只保留这一个构造入口，不再另提供"只返回占位符串"的变体：裸占位符拼进
+     * {@code FROM ... GROUP BY} 之间是语法错误，而这类错误只在带范围重算时出现
+     * （启动时的全量重算走空过滤分支，跑得过），单测很难发现。
+     */
+    static String whereIn(Collection<String> strategyIds) {
         if (strategyIds == null || strategyIds.isEmpty()) return "";
-        return String.join(",", Collections.nCopies(strategyIds.size(), "?"));
-    }
-
-    private static String whereIn(Collection<String> strategyIds) {
-        String clause = inClause(strategyIds);
-        return clause.isEmpty() ? "" : "WHERE strategy_id IN (" + clause + ")";
+        String placeholders = String.join(",", Collections.nCopies(strategyIds.size(), "?"));
+        return "WHERE strategy_id IN (" + placeholders + ")";
     }
 
     private static void bindIds(PreparedStatement statement, Collection<String> strategyIds)
@@ -128,8 +129,11 @@ public final class StrategyGovernanceRepository {
     }
 
     /**
-     * 记录曝光并刷新去重后的人数。同一用户对同一策略只计一次，
-     * 否则重复推荐会把人数上限刷爆，渐进投放就失去意义。
+     * 记录曝光。同一用户对同一策略只计一次，否则重复推荐会把人数上限刷爆，
+     * 渐进投放就失去意义。
+     *
+     * <p>这里只写入事实，不刷新 exposed_user_count：人数是从本表推导的派生值，
+     * 归 {@link #refreshExposedUserCounts} 统一重算，免得同一公式存在两份。
      */
     public void recordExposures(Connection connection, UUID userId, Collection<String> strategyIds)
             throws SQLException {
@@ -139,24 +143,35 @@ public final class StrategyGovernanceRepository {
                 VALUES (?, ?)
                 ON CONFLICT (strategy_id, user_id) DO NOTHING
                 """;
-        String refresh = """
-                UPDATE strategies SET
-                    exposed_user_count = (
-                        SELECT COUNT(*) FROM strategy_exposures e
-                        WHERE e.strategy_id = strategies.strategy_id),
-                    updated_at = NOW()
-                WHERE strategy_id = ?
-                """;
         for (String strategyId : strategyIds) {
             try (PreparedStatement statement = connection.prepareStatement(insert)) {
                 statement.setString(1, strategyId);
                 statement.setObject(2, userId);
                 statement.executeUpdate();
             }
-            try (PreparedStatement statement = connection.prepareStatement(refresh)) {
-                statement.setString(1, strategyId);
-                statement.executeUpdate();
-            }
+        }
+    }
+
+    /**
+     * 从曝光表重建去重后的人数。
+     *
+     * <p>必须在看闸门快照之前执行：升档判定要拿它跟当前档位的人数上限比，
+     * 读旧值就会晚一轮才扩量。
+     *
+     * @param strategyIds 限定范围；null 或空表示全部策略
+     */
+    public void refreshExposedUserCounts(Connection connection, Collection<String> strategyIds)
+            throws SQLException {
+        String sql = """
+                UPDATE strategies SET
+                    exposed_user_count = (
+                        SELECT COUNT(*) FROM strategy_exposures e
+                        WHERE e.strategy_id = strategies.strategy_id)
+                %s
+                """.formatted(whereIn(strategyIds));
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            bindIds(statement, strategyIds);
+            statement.executeUpdate();
         }
     }
 
