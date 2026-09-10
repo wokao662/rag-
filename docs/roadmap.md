@@ -45,7 +45,7 @@
 - 当前命令行程序用于验证流程，不是最终产品界面。
 - 知识库内容极薄：13 个策略共 107 个 chunk，正文总计约 4356 字符，平均每 chunk 41 字符，多为单句定义，缺少实施细节与证据。策略骨架本身是正确的（10/13 精确对应 Dunlosky 等人 2013 年评估的十项技术，chunkType 分为 definition/procedure/suitable_condition/unsuitable_condition），缺的只是内容深度。
 - 三个已发现但未擅自修改的内容质量问题（属于人工审核的范围）：`strategy-learning-motivation-types`（1 个 chunk）与 `strategy-learning-strategy-classification`（2 个 chunk）的 `steps` 是空数组，它们是背景分类知识而不是可执行方法，推中时会产生空的 `methodSteps`；`strategy-spaced-learning`（间隔学习，12 chunk，6 步）与 `strategy-distributed-practice`（间隔练习，11 chunk，6 步）是间隔效应的近重复，可能同时推给同一用户，且前者档案缺 `evidenceScore`/`effectivenessScore`，按 0 导入后合成分垫底；`data/sources/source-002.json` 的 authors 与 publisher 同为一人，导致 attribution 拼成重复串。
-- 推荐链路耗时已经在超时阈值边缘：`RecommendationChatClient` 的 `readTimeout` 是 90 秒，实测成功调用耗时 80 秒与 89 秒，探针期间出现过一次 90.5 秒超时。语料填厚后（`expandByStrategy` 会把候选策略的全部 chunk 拼进提示词）会更慢。这需要单独处理：调阈值、限制知识负载、或换更快的模型，三者都影响推荐质量，不在存储层这一轮里草率定。
+- 推荐链路耗时在超时阈值边缘且波动极大：`RecommendationChatClient` 的 `readTimeout` 是 90 秒，早期探针实测成功调用耗时 80 秒与 89 秒并出现过一次 90.5 秒超时，而同一条链路 2026-09-10 只用了 23.2 秒。V8 起 token 用量入库，这件事第一次可以被测量而不是推测：那次 23.2 秒是 prompt 3427 + completion 845，同批 `extract`（479/204，6.0 秒）与 `decide`（809/129，3.8 秒）的生成速率都是 33-36 token/秒。**耗时几乎全由输出长度决定，数千 token 的输入贡献不到一秒**（`decide` 输入比 `extract` 大 69% 却更快）。据此，80-89 秒那几次对应的是 completion 撞上 `max_tokens=1400` 且服务端速率掉到约 16 token/秒。**所以“限制知识负载”治不了超时**，它治的是成本与 `findByStrategyIds` 的截断；超时的真实选项只有压 `max_tokens`、调阈值、换更快的模型，三者都影响推荐质量，不在存储层这一轮里草率定。
 - `QdrantClient.findByStrategyIds` 使用 scroll 且 `limit` 固定为 100、未处理分页，单个策略超过 100 个 chunk 时会静默截断。语料填厚后必然触发，且无错误无日志。
 - 没有审核者角色：`access_codes` 表无 role 列，所有测试者平权，`reviewed_by` 只是个 `VARCHAR(64)`。这直接卡住了 `review-gate` 能否开启，也卡住了 `reviewer_score`（模型二的核心训练标签）能否开始积累。
 - 投稿入口、审核队列、以及审核通过后自动 Embedding 写入 Qdrant 的路径都未实现。存储层已就绪，但只能靠导入器从本地 JSON 入库。
@@ -162,7 +162,7 @@
 
 1. 定义审核者角色与权限（`access_codes` 加 role 列或另建管理员凭证）。**这是当前的硬卡点**：没有它就无法真审核，`review-gate` 无法开启，`reviewer_score` 也无法开始积累——而它是适合人群预测模型的核心训练标签。
 2. 人工审核现有 13 个策略：先处理《当前方案的临时性质》里列出的三个内容质量问题，再把通过的置为 `approved`，最后打开 `GOVERNANCE_REVIEW_GATE=true`。在此之前闸门的两条审核相关规则只能空转。
-3. 修 `findByStrategyIds` 的静默截断（`limit` 固定 100、不分页），并为召回的知识负载设定上限。**这一项已经从“语料填厚前要做”变成“现在就要做”**：实测推荐链路耗时 80–89 秒，`readTimeout` 是 90 秒，已经出现过一次超时失败；`expandByStrategy` 会把候选策略的全部 chunk 拼进提示词，语料一变厚就会稳定超时。调阈值、限负载、换模型三者都影响推荐质量，需要一起决策。
+3. 修 `findByStrategyIds` 的静默截断（`limit` 固定 100、不分页）。**截断本身现在就要修**：它无错误无日志，语料一变厚就静默丢数据。但它与超时是两件事——原先把两者绑在一起的理由已被 V8 的 token 实测推翻：推荐链路的 prompt 是 3427 token，耗时几乎全由 completion 决定，所以限制知识负载治不了超时，它治的是成本与截断。超时是独立一项：`readTimeout` 90 秒，早期实测 80–89 秒并出现过一次超时失败，后来同一条链路只用 23 秒，波动来自服务端生成速率（实测 16–36 token/秒）。压 `max_tokens`、调阈值、换模型三者都影响推荐质量，需要一起决策。
 4. 定下剩余的渐进投放参数：投稿者能看到自己投稿的哪些数据、是否需要随机曝光以避免选择偏差（当前曝光完全由检索相似度决定，被推中的策略天然更契合查询，反馈数据有偏）。
 5. 定义画像字段来源层级的**使用侧**规则（`confirmed`/`stated`/`inferred` 如何在追问与推荐中差别对待、新旧冲突如何保存而不覆盖旧证据）。采集侧已完成：`observed` 层级已由 `behavior_observations` 落库，但按 2026-09-10 的隐私决定，它不进入模型一的输入，因此使用侧暂时只有人工查看一条路径。
 6. 部署到云服务器供测试者使用；启用访问码，补投稿接口保护与限流。

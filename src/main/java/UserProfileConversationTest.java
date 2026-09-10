@@ -81,13 +81,15 @@ public final class UserProfileConversationTest {
                     connection.commit();
                 }
 
-                JsonObject extraction = extractor.extract(existingProfile, recent, input);
+                // 这两个客户端现在把 token 用量随返回值一起带出来，供调用方写 model_call_logs。
+                // CLI 不记日志，所以用量在这里直接丢掉，只取 content。
+                JsonObject extraction = extractor.extract(existingProfile, recent, input).content();
                 UserProfileValidator.ValidationResult validation = validator.validate(extraction, input);
                 JsonObject merged = merger.merge(existingProfile, validation.acceptedUpdates(), userMessageId);
                 ProfileReadinessPolicy.Decision fallbackDecision = readiness.evaluate(merged);
                 ProfileDecisionValidator.Decision decision;
                 try {
-                    decision = profileAgent.decide(merged, recent);
+                    decision = profileAgent.decide(merged, recent).content();
                 } catch (Exception agentError) {
                     System.err.println("画像 Agent 暂时不可用，已使用本地规则继续：" + agentError.getMessage());
                     decision = new ProfileDecisionValidator.Decision(

@@ -42,6 +42,10 @@ public class ModelCallLogger {
         this.retentionDays = retentionDays;
     }
 
+    /**
+     * @param usage 本次调用的 token 用量；没有真正调用模型（failed 与 fallback 路径）时传
+     *              {@code null}，而不是传三个 0。用量只是三个计数，不含用户内容，所以不过脱敏。
+     */
     public void log(
             UUID userId,
             UUID conversationId,
@@ -51,7 +55,8 @@ public class ModelCallLogger {
             JsonObject output,
             long latencyMs,
             String status,
-            String errorMessage
+            String errorMessage,
+            TokenUsage usage
     ) {
         // 脱敏后的对象是深拷贝：调用方在记完日志之后还要继续用原始的 input/output，
         // 原地修改会把占位符带进画像抽取和推荐结果里。
@@ -63,7 +68,7 @@ public class ModelCallLogger {
                 Connection connection = DataSourceUtils.getConnection(dataSource);
                 try {
                     logs.save(connection, userId, conversationId, taskType, model,
-                            safeInput, safeOutput, latencyMs, status, safeError);
+                            safeInput, safeOutput, latencyMs, status, safeError, usage);
                     return null;
                 } catch (SQLException error) {
                     throw new DataAccessResourceFailureException("写入模型调用日志失败", error);

@@ -23,7 +23,8 @@ public final class ModelCallLogRepository {
             JsonObject output,
             long latencyMs,
             String status,
-            String errorMessage
+            String errorMessage,
+            TokenUsage usage
     ) throws SQLException {
         if (!ALLOWED_TASKS.contains(taskType)) {
             throw new IllegalArgumentException("不支持的任务类型：" + taskType);
@@ -35,12 +36,20 @@ public final class ModelCallLogRepository {
             throw new IllegalArgumentException("model 不能为空");
         }
         if (latencyMs < 0) throw new IllegalArgumentException("latencyMs 不能小于 0");
+        if (usage != null) {
+            // 数据库有 CHECK (>= 0) 兜底，但写库失败会被 ModelCallLogger 静默吞掉（那是它对主流程的
+            // 承诺），只有在这里拦住才真的看得见。
+            requireNonNegative(usage.promptTokens(), "promptTokens");
+            requireNonNegative(usage.completionTokens(), "completionTokens");
+            requireNonNegative(usage.totalTokens(), "totalTokens");
+        }
 
         String sql = """
                 INSERT INTO model_call_logs
                     (user_id, conversation_id, task_type, model, input_json, output_json,
-                     latency_ms, status, error_message)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     latency_ms, status, error_message,
+                     prompt_tokens, completion_tokens, total_tokens)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """;
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setObject(1, userId);
@@ -56,7 +65,30 @@ public final class ModelCallLogRepository {
             statement.setLong(7, latencyMs);
             statement.setString(8, status);
             statement.setString(9, errorMessage);
+            // 用量整体可空：failed 与 fallback 行没有调用模型，usage 传 null 就三列都写 NULL。
+            setNullableInt(statement, 10, usage == null ? null : usage.promptTokens());
+            setNullableInt(statement, 11, usage == null ? null : usage.completionTokens());
+            setNullableInt(statement, 12, usage == null ? null : usage.totalTokens());
             statement.executeUpdate();
+        }
+    }
+
+    /**
+     * 写可空的 token 计数。用 {@code setNull} 而不是 {@code setInt(0)}：“没有调用模型”与
+     * “调用了但消耗 0 token”必须分开，否则平均用量会被一堆 0 拉低，真实单价看不出来。
+     */
+    private static void setNullableInt(PreparedStatement statement, int index, Integer value)
+            throws SQLException {
+        if (value == null) {
+            statement.setNull(index, Types.INTEGER);
+        } else {
+            statement.setInt(index, value);
+        }
+    }
+
+    private static void requireNonNegative(Integer value, String field) {
+        if (value != null && value < 0) {
+            throw new IllegalArgumentException(field + " 不能小于 0，实际：" + value);
         }
     }
 

@@ -1,6 +1,8 @@
 package com.example.rag.recommendation;
 
 import com.example.rag.observability.ModelCallLogger;
+import com.example.rag.observability.ModelReply;
+import com.example.rag.observability.TokenUsage;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -61,7 +63,7 @@ public class RecommendationService {
             filteredOut = hits.size() - admitted.size();
             knowledge = mergeKnowledge(buildKnowledge(admitted), expandByStrategy(admitted));
         } catch (IOException error) {
-            logCall(userId, conversationId, queryText, 0, null, start, "failed", error.getMessage());
+            logCall(userId, conversationId, queryText, 0, null, start, "failed", error.getMessage(), null);
             throw new RecommendationUnavailableException("策略检索服务暂时不可用", error);
         }
 
@@ -69,28 +71,34 @@ public class RecommendationService {
             RecommendationResult empty = new RecommendationResult(
                     "no_match", "知识库中还没有可推荐的学习策略，请稍后再试。",
                     queryText, List.of(), List.of(), List.of());
-            logCall(userId, conversationId, queryText, filteredOut, outputOf(empty), start, "success", null);
+            logCall(userId, conversationId, queryText, filteredOut, outputOf(empty), start, "success", null, null);
             return empty;
         }
 
-        JsonObject raw;
+        ModelReply<JsonObject> reply;
         try {
-            raw = chatClient.generate(profile, queryText, knowledge);
+            reply = chatClient.generate(profile, queryText, knowledge);
         } catch (IOException error) {
-            logCall(userId, conversationId, queryText, filteredOut, null, start, "failed", error.getMessage());
+            logCall(userId, conversationId, queryText, filteredOut, null, start, "failed", error.getMessage(),
+                    null);
             throw new RecommendationUnavailableException("推荐生成服务暂时不可用", error);
         }
+        JsonObject raw = reply.content();
 
         RecommendationValidator.Output output;
         try {
             output = validator.validate(raw, candidateChunkIds(knowledge));
         } catch (IllegalArgumentException error) {
-            logCall(userId, conversationId, queryText, filteredOut, raw, start, "failed", error.getMessage());
+            // 校验失败时 token 已经花掉了，用量照记。这类行正是“模型输出不合规范”的样本，
+            // 而它花了多少 token 是判定该压 max_tokens 还是该改提示词的依据。
+            logCall(userId, conversationId, queryText, filteredOut, raw, start, "failed", error.getMessage(),
+                    reply.usage());
             throw new RecommendationUnavailableException("推荐结果未通过格式校验", error);
         }
         RecommendationResult result = new RecommendationResult(output.status(), output.answer(), queryText,
                 output.userConstraints(), output.recommendations(), output.followUpQuestions());
-        logCall(userId, conversationId, queryText, filteredOut, outputOf(result), start, "success", null);
+        logCall(userId, conversationId, queryText, filteredOut, outputOf(result), start, "success", null,
+                reply.usage());
         recordExposure(userId, result.recommendations());
         return result;
     }
@@ -159,14 +167,19 @@ public class RecommendationService {
         return strategyIds;
     }
 
+    /**
+     * @param usage token 用量。检索阶段失败、知识库为空、生成请求失败这三种情况都没有真正
+     *              调用模型，传 {@code null}。
+     */
     private void logCall(UUID userId, UUID conversationId, String queryText, int gateFilteredOut,
-                         JsonObject output, long start, String status, String errorMessage) {
+                         JsonObject output, long start, String status, String errorMessage,
+                         TokenUsage usage) {
         JsonObject input = new JsonObject();
         input.addProperty("queryText", queryText);
         // 把闸门挡下的数量记进日志：推荐突然变空时，这是区分“没召回”与“被闸门挡下”的唯一证据。
         input.addProperty("gateFilteredOut", gateFilteredOut);
         callLogger.log(userId, conversationId, "recommend", RecommendationChatClient.MODEL,
-                input, output, System.currentTimeMillis() - start, status, errorMessage);
+                input, output, System.currentTimeMillis() - start, status, errorMessage, usage);
     }
 
     private static JsonObject outputOf(RecommendationResult result) {

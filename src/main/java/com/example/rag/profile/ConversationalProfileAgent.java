@@ -1,5 +1,7 @@
 package com.example.rag.profile;
 
+import com.example.rag.observability.ModelReply;
+import com.example.rag.observability.TokenUsage;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
@@ -59,7 +61,7 @@ public final class ConversationalProfileAgent implements AutoCloseable {
         this.apiKey = apiKey;
     }
 
-    public ProfileDecisionValidator.Decision decide(
+    public ModelReply<ProfileDecisionValidator.Decision> decide(
             JsonObject profile,
             List<MessageRepository.StoredMessage> recentMessages
     ) throws IOException {
@@ -100,9 +102,13 @@ public final class ConversationalProfileAgent implements AutoCloseable {
             }
             try {
                 JsonObject apiResponse = JsonParser.parseString(responseBody).getAsJsonObject();
+                // usage 与 choices 同层，且必须在校验内容之前取出来：校验失败会抛异常，
+                // 而那时 token 已经花掉了，用量却再也拿不回来。
+                TokenUsage usage = TokenUsage.fromApi(apiResponse);
                 String content = apiResponse.getAsJsonArray("choices").get(0).getAsJsonObject()
                         .getAsJsonObject("message").get("content").getAsString();
-                return validator.validate(JsonParser.parseString(content).getAsJsonObject());
+                return new ModelReply<>(
+                        validator.validate(JsonParser.parseString(content).getAsJsonObject()), usage);
             } catch (RuntimeException error) {
                 throw new IOException("画像 Agent 返回内容未通过格式校验", error);
             }

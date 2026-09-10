@@ -426,11 +426,25 @@ docker exec rag-postgres psql -U learning_app -d learning_app -c "INSERT INTO ac
 
 ### 模型调用日志
 
-每次大模型调用（画像抽取 `extract`、画像决策 `decide`、推荐生成 `recommend`）都会写入 `model_call_logs` 表：任务类型、模型版本、输入输出快照、耗时、`status`（`success` / `fallback` 走了本地兜底 / `failed`）和失败原因。日志写入失败不影响主流程。用于定位延迟瓶颈、评估推荐质量，以及为后续自研模型积累评测数据：
+每次大模型调用（画像抽取 `extract`、画像决策 `decide`、推荐生成 `recommend`）都会写入 `model_call_logs` 表：任务类型、模型版本、输入输出快照、耗时、`status`（`success` / `fallback` 走了本地兜底 / `failed`）、失败原因，以及三个 token 计数（`prompt_tokens` / `completion_tokens` / `total_tokens`）。日志写入失败不影响主流程。用于定位延迟瓶颈、评估推荐质量，以及为后续自研模型积累评测数据：
 
 ```powershell
-docker exec rag-postgres psql -U learning_app -d learning_app -c "SELECT task_type, status, latency_ms, created_at FROM model_call_logs ORDER BY created_at DESC LIMIT 10;"
+docker exec rag-postgres psql -U learning_app -d learning_app -c "SELECT task_type, status, latency_ms, prompt_tokens, completion_tokens, created_at FROM model_call_logs ORDER BY created_at DESC LIMIT 10;"
 ```
+
+#### token 用量与延迟归因
+
+三个计数都可空：`failed` 与 `fallback` 行没有真正调用模型，NULL 表示“未知”而不是 0，否则平均用量会被一堆没花钱的调用拉低。`total_tokens` 缺失时不用前两个补算，这样“API 没报”与“API 报了这个数”在库里仍可区分——换成带思维链的模型后，真实 total 会包含 reasoning token，补算值就会与计费值偏离。
+
+拆开存输入与输出是为了定位延迟。2026-09-10 的首批实测数据（同一次会话的三次调用）：
+
+| 任务 | prompt | completion | 耗时 | 生成速率 |
+| --- | --- | --- | --- | --- |
+| `extract` | 479 | 204 | 6.0 秒 | 33.7 token/秒 |
+| `decide` | 809 | 129 | 3.8 秒 | 34.4 token/秒 |
+| `recommend` | 3427 | 845 | 23.2 秒 | 36.4 token/秒 |
+
+三者速率一致，而 `decide` 的输入比 `extract` 大 69% 却更快，差别只在输出长度：**耗时几乎全由 completion 决定，数千 token 的输入贡献不到一秒**。这条数据推翻了此前“语料填厚就会稳定超时”的归因——削减知识负载治不了超时，它治的是成本与截断。早期观测到的 80–89 秒，对应的是 completion 撞上 `max_tokens=1400` 且服务端速率掉到约 16 token/秒，所以真正的风险是**输出上限乘以速率波动**，而速率随服务端负载在 16–36 token/秒之间摆动。
 
 #### 写入前脱敏
 
