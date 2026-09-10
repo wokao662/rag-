@@ -47,7 +47,7 @@
 - 三个已发现但未擅自修改的内容质量问题（属于人工审核的范围）：`strategy-learning-motivation-types`（1 个 chunk）与 `strategy-learning-strategy-classification`（2 个 chunk）的 `steps` 是空数组，它们是背景分类知识而不是可执行方法，推中时会产生空的 `methodSteps`；`strategy-spaced-learning`（间隔学习，12 chunk，6 步）与 `strategy-distributed-practice`（间隔练习，11 chunk，6 步）是间隔效应的近重复，可能同时推给同一用户，且前者档案缺 `evidenceScore`/`effectivenessScore`，按 0 导入后合成分垫底；`data/sources/source-002.json` 的 authors 与 publisher 同为一人，导致 attribution 拼成重复串。
 - 推荐链路耗时在超时阈值边缘且波动极大：`RecommendationChatClient` 的 `readTimeout` 是 90 秒，早期探针实测成功调用耗时 80 秒与 89 秒并出现过一次 90.5 秒超时，而同一条链路 2026-09-10 只用了 23.2 秒。V8 起 token 用量入库，这件事第一次可以被测量而不是推测：那次 23.2 秒是 prompt 3427 + completion 845，同批 `extract`（479/204，6.0 秒）与 `decide`（809/129，3.8 秒）的生成速率都是 33-36 token/秒。**耗时几乎全由输出长度决定，数千 token 的输入贡献不到一秒**（`decide` 输入比 `extract` 大 69% 却更快）。据此，80-89 秒那几次对应的是 completion 撞上 `max_tokens=1400` 且服务端速率掉到约 16 token/秒。**所以“限制知识负载”治不了超时**，它治的是成本与 `findByStrategyIds` 的截断；超时的真实选项只有压 `max_tokens`、调阈值、换更快的模型，三者都影响推荐质量，不在存储层这一轮里草率定。
 - `QdrantClient.findByStrategyIds` 使用 scroll 且 `limit` 固定为 100、未处理分页，单个策略超过 100 个 chunk 时会静默截断。语料填厚后必然触发，且无错误无日志。
-- 没有审核者角色：`access_codes` 表无 role 列，所有测试者平权，`reviewed_by` 只是个 `VARCHAR(64)`。这直接卡住了 `review-gate` 能否开启，也卡住了 `reviewer_score`（模型二的核心训练标签）能否开始积累。
+- 审核者身份已有存储与告知，但还没有强制点：V9 给 `access_codes` 加了 `role` 列（`tester` / `reviewer`，默认 `tester`），`POST /api/v1/auth/redeem` 会把角色返回给前端用于决定是否展示审核入口。但审核类端点本身尚未实现，所以 `reviewer` 目前不拦截任何请求，`strategies` 的 `reviewed_by` / `reviewed_at` / `review_note` / `reviewer_score` 四列自 V6 起依然没有任何代码写入。`review-gate` 能否开启、`reviewer_score`（模型二的核心训练标签）能否开始积累，卡点已从“没有角色”移到“没有审核端点”。
 - 投稿入口、审核队列、以及审核通过后自动 Embedding 写入 Qdrant 的路径都未实现。存储层已就绪，但只能靠导入器从本地 JSON 入库。
 - 归档只到“标记 + 闸门挡下”为止：没有人工确认入口，也不会从 Qdrant 移除向量。
 - 无限流机制，公网部署后存在被脚本刷 token 的风险。
@@ -110,7 +110,7 @@
 
 仍未做：
 
-- 定义审核者角色与权限（`access_codes` 加 role 列或另建管理员凭证）。**这是当前的硬卡点**：没有它就无法真审核，`review-gate` 也就无法开启。
+- 定义审核权限的**强制点**：V9 已给 `access_codes` 加 `role` 列并由 `redeem` 返回给前端，但没有审核端点去校验它，所以 `reviewer` 当前只是身份告知。审核端点落地时需同时定义：角色在哪一层校验、`reviewed_by` 写谁的标识（访问码还是 `label`）、以及同一人能否审自己投的稿。
 - Web 界面增加投稿入口；投稿接口纳入 `/api/v1/users/{externalId}/` 前缀以复用现有访问码过滤器，避免公网匿名提交。
 - 模型初判不在提交时同步执行，改为队列或审核者点开时触发，并加投稿频率限制。
 - 审核界面：待审核列表、展示模型初判与推荐度、通过/驳回/修改，并单独记录审核者判断到 `reviewer_score`（与模型 `predictedScore` 的差值即适合人群预测模型的训练标签）。
@@ -160,7 +160,7 @@
 
 按依赖顺序排列，前三项互为前置：
 
-1. 定义审核者角色与权限（`access_codes` 加 role 列或另建管理员凭证）。**这是当前的硬卡点**：没有它就无法真审核，`review-gate` 无法开启，`reviewer_score` 也无法开始积累——而它是适合人群预测模型的核心训练标签。
+1. 实现审核端点并在其中校验角色。**角色基础设施已于 V9 完成**（`access_codes.role` + `redeem` 返回），现在缺的是消费它的端点：没有它就无法真审核，`review-gate` 无法开启，`reviewer_score` 也无法开始积累——而它是适合人群预测模型的核心训练标签。同时把 `strategies` 那四个自 V6 起无人写入的审核列（`reviewed_by` / `reviewed_at` / `review_note` / `reviewer_score`）接上。
 2. 人工审核现有 13 个策略：先处理《当前方案的临时性质》里列出的三个内容质量问题，再把通过的置为 `approved`，最后打开 `GOVERNANCE_REVIEW_GATE=true`。在此之前闸门的两条审核相关规则只能空转。
 3. 修 `findByStrategyIds` 的静默截断（`limit` 固定 100、不分页）。**截断本身现在就要修**：它无错误无日志，语料一变厚就静默丢数据。但它与超时是两件事——原先把两者绑在一起的理由已被 V8 的 token 实测推翻：推荐链路的 prompt 是 3427 token，耗时几乎全由 completion 决定，所以限制知识负载治不了超时，它治的是成本与截断。超时是独立一项：`readTimeout` 90 秒，早期实测 80–89 秒并出现过一次超时失败，后来同一条链路只用 23 秒，波动来自服务端生成速率（实测 16–36 token/秒）。压 `max_tokens`、调阈值、换模型三者都影响推荐质量，需要一起决策。
 4. 定下剩余的渐进投放参数：投稿者能看到自己投稿的哪些数据、是否需要随机曝光以避免选择偏差（当前曝光完全由检索相似度决定，被推中的策略天然更契合查询，反馈数据有偏）。

@@ -21,7 +21,8 @@ public class AuthController {
 
     @PostMapping("/redeem")
     public RedeemResponse redeem(@Valid @RequestBody RedeemRequest request) {
-        return new RedeemResponse(accessCodes.redeem(request.code()));
+        AccessCodeService.Redemption redemption = accessCodes.redeem(request.code());
+        return new RedeemResponse(redemption.externalId(), redemption.role());
     }
 
     public record RedeemRequest(
@@ -32,6 +33,10 @@ public class AuthController {
     ) {
     }
 
-    public record RedeemResponse(String externalId) {
+    /**
+     * @param role {@code tester} 或 {@code reviewer}；前端据此决定是否展示审核入口。
+     *             审核类端点本身尚未实现，所以这里只告知身份，不做权限拦截。
+     */
+    public record RedeemResponse(String externalId, String role) {
     }
 }

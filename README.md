@@ -422,7 +422,29 @@ docker exec rag-postgres psql -U learning_app -d learning_app -c "INSERT INTO ac
 
 一个访问码对应一个独立的用户空间（访问码即用户标识，首次使用自动创建用户）。收回权限：`UPDATE access_codes SET revoked = TRUE WHERE code = 'TEST-8F3K2';`。
 
-启用条件：`access_codes` 表非空。启用后所有 `/api/v1/users/**` 接口要求请求头 `X-Access-Code`，且访问码必须与路径中的用户标识一致，否则返回 401。发放访问码后如还需使用旧的开发用户（如 `web-user-001`），把它的标识也插入 `access_codes` 即可。
+启用条件：`access_codes` 表非空。启用后所有 `/api/v1/users/**` 接口要求请求头 `X-Access-Code`，且访问码必须与路径中的用户标识一致，否则返回 401。发放访问码后如还需使用旧的开发用户（如 `web-user-001`），把它的标识也插入 `access_codes` 即可。表为空时是本地开发模式，请求直接放行。
+
+#### 角色
+
+每个访问码带一个 `role`，默认 `tester`（只能访问自己的用户空间）；审核者发放 `reviewer`：
+
+```powershell
+docker exec rag-postgres psql -U learning_app -d learning_app -c "INSERT INTO access_codes (code, label, role) VALUES ('REVIEW-01', '发给审核人', 'reviewer');"
+```
+
+角色属于访问码而不属于用户：同一个人可以同时持有 `tester` 与 `reviewer` 两个码，审核身份泄露时单独停用那一个即可，不影响他继续使用产品。取值受 `access_codes_role_check` 约束，插入其它角色会被数据库拒绝。
+
+兑换接口返回角色，前端据此决定是否展示审核入口：
+
+```
+POST /api/v1/auth/redeem
+{"code": "REVIEW-01"}
+-> 200 {"externalId": "REVIEW-01", "role": "reviewer"}
+```
+
+码不存在或已 `revoked` 返回 401（`revoked` 的 `reviewer` 码同样被拒，角色不绕过停用）；兑换成功会创建用户并更新 `last_used_at`。
+
+这是 `role` 目前唯一的消费点：**审核类端点尚未实现，所以 `reviewer` 只告知身份、不拦截任何请求**。等审核端点落地时，强制点应放在端点上（校验兑换者的角色），而不是塞进 `AccessCodeFilter`——那个过滤器只判断 `X-Access-Code` 与路径中的用户标识是否一致，与角色无关，混进去会让两件事都变难查。
 
 ### 模型调用日志
 
