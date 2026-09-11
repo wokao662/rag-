@@ -31,13 +31,13 @@ JSONL 中每行包含 `chunkId`、正文 `text` 和基础 `metadata`，后续可
 项目通过 Maven 接入 Apache Tika，可从 PDF、Word、PowerPoint、HTML 等常见文档中提取文本。
 
 ```powershell
-mvn compile exec:java "-Dexec.mainClass=DocumentExtractor" "-Dexec.args=资料文件.pdf data/raw/source-001.txt"
+mvn compile exec:java "-Dexec.mainClass=com.example.rag.cli.DocumentExtractor" "-Dexec.args=资料文件.pdf data/raw/source-001.txt"
 ```
 
 省略第二个参数时，默认输出到 `data/raw/<输入文件名>.txt`：
 
 ```powershell
-mvn compile exec:java "-Dexec.mainClass=DocumentExtractor" "-Dexec.args=资料文件.pdf"
+mvn compile exec:java "-Dexec.mainClass=com.example.rag.cli.DocumentExtractor" "-Dexec.args=资料文件.pdf"
 ```
 
 当前内嵌解析方式只应用于本地可信文档；开放用户上传后应改用隔离的 Tika 服务。
@@ -201,7 +201,7 @@ docker compose stop postgres
 
 ## Spring Boot 后端
 
-正式后端入口为 `com.example.rag.RagApplication`。命令行测试类已整理到 `com.example.rag.cli` 包下（`LLMTest` 已删除），用于验证模型和 RAG 链路；WebApp 后续只调用 Spring Boot HTTP API。
+正式后端入口为 `com.example.rag.RagApplication`。命令行工具与测试类统一放在 `com.example.rag.cli` 包下（`LLMTest` 已删除；`DocumentExtractor` 是文档提取工具，其余几个用于验证模型和 RAG 链路）。`src/main/java` 根目录不放类：默认包里的类无法被命名包 import，Spring 的服务就永远复用不了它。WebApp 后续只调用 Spring Boot HTTP API。
 
 先启动 PostgreSQL：
 

@@ -19,7 +19,7 @@
         <maven.compiler.release>17</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <tika.version>4.0.0</tika.version>
-        <exec.mainClass>LLMTest</exec.mainClass>
+        <exec.mainClass>com.example.rag.RagApplication</exec.mainClass>
     </properties>
 
     <dependencies>

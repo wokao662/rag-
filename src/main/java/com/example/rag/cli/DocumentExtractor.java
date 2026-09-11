@@ -1,3 +1,5 @@
+package com.example.rag.cli;
+
 import org.apache.tika.Tika;
 import org.apache.tika.exception.TikaException;
 
