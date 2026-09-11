@@ -1,6 +1,7 @@
 package com.example.rag.profile;
 
 import com.example.rag.observability.ModelCallLogger;
+import com.example.rag.observability.ModelReply;
 import com.example.rag.recommendation.FeedbackRepository;
 import com.example.rag.recommendation.RecommendationService;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -38,6 +39,7 @@ public class UserProfileService {
     private final ProfileReadinessPolicy readinessPolicy;
     private final RecommendationService recommendationService;
     private final ModelCallLogger callLogger;
+    private final BehaviorObservationService observations;
     private final UserRepository users = new UserRepository();
     private final ConversationRepository conversations = new ConversationRepository();
     private final MessageRepository messages = new MessageRepository();
@@ -54,7 +56,8 @@ public class UserProfileService {
             UserProfileMerger merger,
             ProfileReadinessPolicy readinessPolicy,
             RecommendationService recommendationService,
-            ModelCallLogger callLogger
+            ModelCallLogger callLogger,
+            BehaviorObservationService observations
     ) {
         this.dataSource = dataSource;
         this.transactions = transactions;
@@ -66,6 +69,7 @@ public class UserProfileService {
         this.readinessPolicy = readinessPolicy;
         this.recommendationService = recommendationService;
         this.callLogger = callLogger;
+        this.observations = observations;
     }
 
     public ConversationStarted startConversation(String externalId) {
@@ -94,20 +98,25 @@ public class UserProfileService {
             return new TurnContext(userId, messageId, profile, version, recent);
         });
 
-        JsonObject extraction;
+        ModelReply<JsonObject> extractionReply;
         JsonObject extractInput = new JsonObject();
         extractInput.addProperty("currentUserMessage", content.trim());
         long extractStart = System.currentTimeMillis();
         try {
-            extraction = extractor.extract(context.profile(), context.recentMessages(), content.trim());
+            extractionReply = extractor.extract(context.profile(), context.recentMessages(), content.trim());
             callLogger.log(context.userId(), conversationId, "extract", UserProfileExtractor.MODEL,
-                    extractInput, extraction, System.currentTimeMillis() - extractStart, "success", null);
+                    extractInput, extractionReply.content(), System.currentTimeMillis() - extractStart,
+                    "success", null, extractionReply.usage());
         } catch (IOException error) {
+            // 请求本身就失败了，没有用量可记。传 null 而不是三个 0：后者会把这次没花钱的
+            // 调用算进平均用量里。
             callLogger.log(context.userId(), conversationId, "extract", UserProfileExtractor.MODEL,
-                    extractInput, null, System.currentTimeMillis() - extractStart, "failed", error.getMessage());
+                    extractInput, null, System.currentTimeMillis() - extractStart, "failed", error.getMessage(),
+                    null);
             throw new ProfileModelException("画像抽取服务暂时不可用", error);
         }
-        UserProfileValidator.ValidationResult validation = validator.validate(extraction, content.trim());
+        UserProfileValidator.ValidationResult validation =
+                validator.validate(extractionReply.content(), content.trim());
         JsonObject merged = merger.merge(context.profile(), validation.acceptedUpdates(), context.messageId());
         ProfileReadinessPolicy.Decision fallback = readinessPolicy.evaluate(merged);
         ProfileDecisionValidator.Decision decision = decideWithFallback(
@@ -145,6 +154,10 @@ public class UserProfileService {
             }
             return null;
         });
+
+        // 行为观测在事务提交之后重算，这一轮的消息与推荐才已经在库里。
+        // 采集失败不会抛到这里（服务内部已吃掉），对话不会因旁路数据而失败。
+        observations.refresh(context.userId());
 
         return new TurnResult(
                 decision.action(), decision.ready(), fallback.completeness(), decision.confidence(),
@@ -225,18 +238,21 @@ public class UserProfileService {
     ) {
         long start = System.currentTimeMillis();
         try {
-            ProfileDecisionValidator.Decision decision = profileAgent.decide(profile, recent);
+            ModelReply<ProfileDecisionValidator.Decision> reply = profileAgent.decide(profile, recent);
+            ProfileDecisionValidator.Decision decision = reply.content();
             JsonObject output = new JsonObject();
             output.addProperty("action", decision.action());
             output.addProperty("ready", decision.ready());
             output.addProperty("confidence", decision.confidence());
             output.addProperty("reason", decision.reason());
             callLogger.log(userId, conversationId, "decide", ConversationalProfileAgent.MODEL,
-                    null, output, System.currentTimeMillis() - start, "success", null);
+                    null, output, System.currentTimeMillis() - start, "success", null, reply.usage());
             return decision;
         } catch (Exception error) {
+            // 走本地兜底就没有调用模型，用量传 null。这一行的价值在 status='fallback' 与
+            // error_message 上：它们是模型一最需要的难样本标签。
             callLogger.log(userId, conversationId, "decide", ConversationalProfileAgent.MODEL,
-                    null, null, System.currentTimeMillis() - start, "fallback", error.getMessage());
+                    null, null, System.currentTimeMillis() - start, "fallback", error.getMessage(), null);
             return new ProfileDecisionValidator.Decision(
                     fallback.ready() ? "recommend" : "ask", fallback.ready(), 0,
                     "画像 Agent 调用失败，使用本地兜底规则", fallback.missingFields(), List.of(),

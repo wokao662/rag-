@@ -14,6 +14,10 @@ import java.sql.SQLException;
 @Service
 public class AccessCodeService {
     private static final int MAX_CODE_LENGTH = 64;
+    /** 默认角色：只能访问自己的用户空间。 */
+    public static final String ROLE_TESTER = "tester";
+    /** 审核者：除自己的用户空间外，还具备审核策略的资格。 */
+    public static final String ROLE_REVIEWER = "reviewer";
 
     private final DataSource dataSource;
     private final TransactionTemplate transactions;
@@ -25,16 +29,22 @@ public class AccessCodeService {
         this.transactions = transactions;
     }
 
-    /** 校验访问码并返回绑定的用户标识；访问码本身即 externalId，首次使用自动建用户。 */
-    public String redeem(String code) {
+    /**
+     * 校验访问码并返回绑定的用户标识与角色；访问码本身即 externalId，首次使用自动建用户。
+     *
+     * <p>角色随兑换结果一起返回，而不是让调用方再查一次：前端需要它决定是否展示审核入口，
+     * 而审核类端点尚未实现，这是 role 列当前的运行时消费点。
+     */
+    public Redemption redeem(String code) {
         String normalized = normalize(code);
         return inTransaction(connection -> {
-            if (!accessCodes.isActive(connection, normalized)) {
-                throw new UnauthorizedException("访问码无效或已被停用");
-            }
+            // 一次查询同时确认有效性与角色，不再单独调 isActive：两者的 WHERE 条件相同，
+            // 分开查就是多一趟数据库往返，而且两次查询之间理论上可能读到不同的行。
+            String role = accessCodes.roleOf(connection, normalized)
+                    .orElseThrow(() -> new UnauthorizedException("访问码无效或已被停用"));
             users.findOrCreateByExternalId(connection, normalized);
             accessCodes.touchLastUsed(connection, normalized);
-            return normalized;
+            return new Redemption(normalized, role);
         });
     }
 
@@ -73,6 +83,15 @@ public class AccessCodeService {
     @FunctionalInterface
     private interface SqlWork<T> {
         T execute(Connection connection) throws SQLException;
+    }
+
+    /**
+     * 兑换结果。
+     *
+     * @param externalId 访问码本身即用户标识
+     * @param role       {@link #ROLE_TESTER} 或 {@link #ROLE_REVIEWER}
+     */
+    public record Redemption(String externalId, String role) {
     }
 
     public static final class UnauthorizedException extends RuntimeException {
