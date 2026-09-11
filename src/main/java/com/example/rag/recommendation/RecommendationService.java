@@ -54,6 +54,9 @@ public class RecommendationService {
 
         JsonArray knowledge;
         int filteredOut;
+        // 补齐时被预算上限挡下的 chunk 数。写在 try 外面并给初值：下面四个 logCall 分支都要用它，
+        // 包括检索本身就失败的那一条（那时确实是 0）。
+        int knowledgeDropped = 0;
         try {
             ensureCollection();
             List<Float> queryVector = embeddingClient.embedQuery(queryText);
@@ -61,9 +64,13 @@ public class RecommendationService {
             // 闸门在召回之后、补齐之前：被挡下的策略连它的其他 chunk 也不应该被拉回来送给模型。
             JsonArray admitted = admit(hits);
             filteredOut = hits.size() - admitted.size();
-            knowledge = mergeKnowledge(buildKnowledge(admitted), expandByStrategy(admitted));
+            QdrantClient.Expansion expansion = expandByStrategy(admitted);
+            knowledge = mergeKnowledge(buildKnowledge(admitted), expansion.points());
+            if (expansion.truncated()) {
+                knowledgeDropped = expansion.totalMatching() - expansion.points().size();
+            }
         } catch (IOException error) {
-            logCall(userId, conversationId, queryText, 0, null, start, "failed", error.getMessage(), null);
+            logCall(userId, conversationId, queryText, 0, 0, null, start, "failed", error.getMessage(), null);
             throw new RecommendationUnavailableException("策略检索服务暂时不可用", error);
         }
 
@@ -71,7 +78,8 @@ public class RecommendationService {
             RecommendationResult empty = new RecommendationResult(
                     "no_match", "知识库中还没有可推荐的学习策略，请稍后再试。",
                     queryText, List.of(), List.of(), List.of());
-            logCall(userId, conversationId, queryText, filteredOut, outputOf(empty), start, "success", null, null);
+            logCall(userId, conversationId, queryText, filteredOut, knowledgeDropped, outputOf(empty), start,
+                    "success", null, null);
             return empty;
         }
 
@@ -79,8 +87,8 @@ public class RecommendationService {
         try {
             reply = chatClient.generate(profile, queryText, knowledge);
         } catch (IOException error) {
-            logCall(userId, conversationId, queryText, filteredOut, null, start, "failed", error.getMessage(),
-                    null);
+            logCall(userId, conversationId, queryText, filteredOut, knowledgeDropped, null, start, "failed",
+                    error.getMessage(), null);
             throw new RecommendationUnavailableException("推荐生成服务暂时不可用", error);
         }
         JsonObject raw = reply.content();
@@ -91,14 +99,14 @@ public class RecommendationService {
         } catch (IllegalArgumentException error) {
             // 校验失败时 token 已经花掉了，用量照记。这类行正是“模型输出不合规范”的样本，
             // 而它花了多少 token 是判定该压 max_tokens 还是该改提示词的依据。
-            logCall(userId, conversationId, queryText, filteredOut, raw, start, "failed", error.getMessage(),
-                    reply.usage());
+            logCall(userId, conversationId, queryText, filteredOut, knowledgeDropped, raw, start, "failed",
+                    error.getMessage(), reply.usage());
             throw new RecommendationUnavailableException("推荐结果未通过格式校验", error);
         }
         RecommendationResult result = new RecommendationResult(output.status(), output.answer(), queryText,
                 output.userConstraints(), output.recommendations(), output.followUpQuestions());
-        logCall(userId, conversationId, queryText, filteredOut, outputOf(result), start, "success", null,
-                reply.usage());
+        logCall(userId, conversationId, queryText, filteredOut, knowledgeDropped, outputOf(result), start,
+                "success", null, reply.usage());
         recordExposure(userId, result.recommendations());
         return result;
     }
@@ -172,12 +180,15 @@ public class RecommendationService {
      *              调用模型，传 {@code null}。
      */
     private void logCall(UUID userId, UUID conversationId, String queryText, int gateFilteredOut,
-                         JsonObject output, long start, String status, String errorMessage,
+                         int knowledgeDropped, JsonObject output, long start, String status, String errorMessage,
                          TokenUsage usage) {
         JsonObject input = new JsonObject();
         input.addProperty("queryText", queryText);
         // 把闸门挡下的数量记进日志：推荐突然变空时，这是区分“没召回”与“被闸门挡下”的唯一证据。
         input.addProperty("gateFilteredOut", gateFilteredOut);
+        // 同理记下补齐时被预算截断的数量：推荐质量下降时得能区分“闸门挡的”“截断丢的”与
+        // “知识库本来就薄”。这正是原先 limit=100 静默截断最缺的东西：那时三者在日志里长得一模一样。
+        input.addProperty("knowledgeDropped", knowledgeDropped);
         callLogger.log(userId, conversationId, "recommend", RecommendationChatClient.MODEL,
                 input, output, System.currentTimeMillis() - start, status, errorMessage, usage);
     }
@@ -198,9 +209,11 @@ public class RecommendationService {
     }
 
     /** 把召回命中策略的全部 chunk 拉回，避免模型只看到定义片段而缺少实施步骤。 */
-    private JsonArray expandByStrategy(JsonArray hits) throws IOException {
+    private QdrantClient.Expansion expandByStrategy(JsonArray hits) throws IOException {
         List<String> strategyIds = strategyIdsOf(hits);
-        return strategyIds.isEmpty() ? new JsonArray() : qdrantClient.findByStrategyIds(strategyIds);
+        return strategyIds.isEmpty()
+                ? new QdrantClient.Expansion(new JsonArray(), 0)
+                : qdrantClient.findByStrategyIds(strategyIds);
     }
 
     /** 合并补齐的 chunk：已召回的保留相似度分数，补齐的不重复、不带分数。 */

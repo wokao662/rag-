@@ -45,8 +45,15 @@
 - 当前命令行程序用于验证流程，不是最终产品界面。
 - 知识库内容极薄：13 个策略共 107 个 chunk，正文总计约 4356 字符，平均每 chunk 41 字符，多为单句定义，缺少实施细节与证据。策略骨架本身是正确的（10/13 精确对应 Dunlosky 等人 2013 年评估的十项技术，chunkType 分为 definition/procedure/suitable_condition/unsuitable_condition），缺的只是内容深度。
 - 三个已发现但未擅自修改的内容质量问题（属于人工审核的范围）：`strategy-learning-motivation-types`（1 个 chunk）与 `strategy-learning-strategy-classification`（2 个 chunk）的 `steps` 是空数组，它们是背景分类知识而不是可执行方法，推中时会产生空的 `methodSteps`；`strategy-spaced-learning`（间隔学习，12 chunk，6 步）与 `strategy-distributed-practice`（间隔练习，11 chunk，6 步）是间隔效应的近重复，可能同时推给同一用户，且前者档案缺 `evidenceScore`/`effectivenessScore`，按 0 导入后合成分垫底；`data/sources/source-002.json` 的 authors 与 publisher 同为一人，导致 attribution 拼成重复串。
-- 推荐链路耗时在超时阈值边缘且波动极大：`RecommendationChatClient` 的 `readTimeout` 是 90 秒，早期探针实测成功调用耗时 80 秒与 89 秒并出现过一次 90.5 秒超时，而同一条链路 2026-09-10 只用了 23.2 秒。V8 起 token 用量入库，这件事第一次可以被测量而不是推测：那次 23.2 秒是 prompt 3427 + completion 845，同批 `extract`（479/204，6.0 秒）与 `decide`（809/129，3.8 秒）的生成速率都是 33-36 token/秒。**耗时几乎全由输出长度决定，数千 token 的输入贡献不到一秒**（`decide` 输入比 `extract` 大 69% 却更快）。据此，80-89 秒那几次对应的是 completion 撞上 `max_tokens=1400` 且服务端速率掉到约 16 token/秒。**所以“限制知识负载”治不了超时**，它治的是成本与 `findByStrategyIds` 的截断；超时的真实选项只有压 `max_tokens`、调阈值、换更快的模型，三者都影响推荐质量，不在存储层这一轮里草率定。
-- `QdrantClient.findByStrategyIds` 使用 scroll 且 `limit` 固定为 100、未处理分页，单个策略超过 100 个 chunk 时会静默截断。语料填厚后必然触发，且无错误无日志。
+- 推荐链路耗时已碰到超时线，而波动完全不在本项目控制范围内：`RecommendationChatClient` 的 `readTimeout` 是 90 秒，同一条链路 2026-09-10 用了 23.2 秒，2026-09-11 用了 83.9 秒——只剩 6 秒余量，而早期探针还出现过一次 90.5 秒真超时。V8 起 token 用量入库，这两天构成了一组同负载对照：
+
+  | 日期 | prompt | completion | 耗时 | 生成速率 |
+  | --- | --- | --- | --- | --- |
+  | 09-10 | 3427 | 845 | 23.2 秒 | 36.4 token/秒 |
+  | 09-11 | 3410 | 893 | 83.9 秒 | 10.6 token/秒 |
+
+  输入差 0.5%、输出差 5.7%，耗时差 3.6 倍，**变量只剩服务端生成速率**。同批的 `extract`（207/19.9 秒）与 `decide`（101/10.2 秒）也都是约 10 token/秒，所以是服务端整体变慢而不是单次抖动。结合 09-10 同批三次调用速率一致（33-36 token/秒）、且 `decide` 输入比 `extract` 大 69% 却更快，可以定下：**耗时几乎全由输出长度决定，数千 token 的输入贡献不到一秒**。**所以“限制知识负载”治不了超时**，它治的是成本与截断；超时的真实选项只有压 `max_tokens`、调阈值、换更快的模型，三者都影响推荐质量，需要一起定。注意按实测下限算，`max_tokens=1400` ÷ 10 token/秒 = 140 秒，单靠调阈值补不回来。
+- 知识负载没有真正的预算：`findByStrategyIds` 的静默截断已修（分页取回 + 上限 200 + 截断量记入 `model_call_logs.knowledgeDropped`），但 200 这个数只是防提示词无边界的安全阀，不是按 token 算出来的预算。每个 chunk 已被截到 500 字符，200 个就是十万字符量级，真填到这个量级上下文窗口会先于预算报错。语料开始填厚前需要定下按 token 的知识负载预算。
 - 审核者身份已有存储与告知，但还没有强制点：V9 给 `access_codes` 加了 `role` 列（`tester` / `reviewer`，默认 `tester`），`POST /api/v1/auth/redeem` 会把角色返回给前端用于决定是否展示审核入口。但审核类端点本身尚未实现，所以 `reviewer` 目前不拦截任何请求，`strategies` 的 `reviewed_by` / `reviewed_at` / `review_note` / `reviewer_score` 四列自 V6 起依然没有任何代码写入。`review-gate` 能否开启、`reviewer_score`（模型二的核心训练标签）能否开始积累，卡点已从“没有角色”移到“没有审核端点”。
 - 投稿入口、审核队列、以及审核通过后自动 Embedding 写入 Qdrant 的路径都未实现。存储层已就绪，但只能靠导入器从本地 JSON 入库。
 - 归档只到“标记 + 闸门挡下”为止：没有人工确认入口，也不会从 Qdrant 移除向量。
@@ -158,11 +165,11 @@
 
 ## 近期优先任务
 
-按依赖顺序排列，前三项互为前置：
+按依赖顺序排列，前两项互为前置：
 
 1. 实现审核端点并在其中校验角色。**角色基础设施已于 V9 完成**（`access_codes.role` + `redeem` 返回），现在缺的是消费它的端点：没有它就无法真审核，`review-gate` 无法开启，`reviewer_score` 也无法开始积累——而它是适合人群预测模型的核心训练标签。同时把 `strategies` 那四个自 V6 起无人写入的审核列（`reviewed_by` / `reviewed_at` / `review_note` / `reviewer_score`）接上。
 2. 人工审核现有 13 个策略：先处理《当前方案的临时性质》里列出的三个内容质量问题，再把通过的置为 `approved`，最后打开 `GOVERNANCE_REVIEW_GATE=true`。在此之前闸门的两条审核相关规则只能空转。
-3. 修 `findByStrategyIds` 的静默截断（`limit` 固定 100、不分页）。**截断本身现在就要修**：它无错误无日志，语料一变厚就静默丢数据。但它与超时是两件事——原先把两者绑在一起的理由已被 V8 的 token 实测推翻：推荐链路的 prompt 是 3427 token，耗时几乎全由 completion 决定，所以限制知识负载治不了超时，它治的是成本与截断。超时是独立一项：`readTimeout` 90 秒，早期实测 80–89 秒并出现过一次超时失败，后来同一条链路只用 23 秒，波动来自服务端生成速率（实测 16–36 token/秒）。压 `max_tokens`、调阈值、换模型三者都影响推荐质量，需要一起决策。
+3. 定推荐链路的超时对策与知识负载预算。`findByStrategyIds` 的静默截断已修（分页取回 + 上限 200 + 截断量记入 `knowledgeDropped`），剩下两件都不是写代码就能了结的：超时侧要在压 `max_tokens`、调 `readTimeout`、换更快的模型之间选，三者都直接影响推荐质量，而 09-11 实测 83.9 秒距 90 秒阈值只剩 6 秒，按实测速率下限算 `max_tokens=1400` 需要 140 秒，单靠调阈值补不回来；知识负载侧要把 200 这个安全阀换成按 token 算的预算。这一项不再阻塞前两项，但语料开始填厚前必须定下来。
 4. 定下剩余的渐进投放参数：投稿者能看到自己投稿的哪些数据、是否需要随机曝光以避免选择偏差（当前曝光完全由检索相似度决定，被推中的策略天然更契合查询，反馈数据有偏）。
 5. 定义画像字段来源层级的**使用侧**规则（`confirmed`/`stated`/`inferred` 如何在追问与推荐中差别对待、新旧冲突如何保存而不覆盖旧证据）。采集侧已完成：`observed` 层级已由 `behavior_observations` 落库，但按 2026-09-10 的隐私决定，它不进入模型一的输入，因此使用侧暂时只有人工查看一条路径。
 6. 部署到云服务器供测试者使用；启用访问码，补投稿接口保护与限流。
