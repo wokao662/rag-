@@ -17,3 +17,6 @@ data/cleaned/
 .DS_Store
 Thumbs.db
 
+# Runtime logs
+spring.log
+

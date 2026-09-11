@@ -31,13 +31,13 @@ JSONL 中每行包含 `chunkId`、正文 `text` 和基础 `metadata`，后续可
 项目通过 Maven 接入 Apache Tika，可从 PDF、Word、PowerPoint、HTML 等常见文档中提取文本。
 
 ```powershell
-mvn compile exec:java "-Dexec.mainClass=DocumentExtractor" "-Dexec.args=资料文件.pdf data/raw/source-001.txt"
+mvn compile exec:java "-Dexec.mainClass=com.example.rag.cli.DocumentExtractor" "-Dexec.args=资料文件.pdf data/raw/source-001.txt"
 ```
 
 省略第二个参数时，默认输出到 `data/raw/<输入文件名>.txt`：
 
 ```powershell
-mvn compile exec:java "-Dexec.mainClass=DocumentExtractor" "-Dexec.args=资料文件.pdf"
+mvn compile exec:java "-Dexec.mainClass=com.example.rag.cli.DocumentExtractor" "-Dexec.args=资料文件.pdf"
 ```
 
 当前内嵌解析方式只应用于本地可信文档；开放用户上传后应改用隔离的 Tika 服务。
@@ -162,13 +162,13 @@ docker exec rag-postgres psql -U learning_app -d learning_app -c "\dt"
 验证 Java JDBC 连接和四张表的读写（测试数据会在事务中回滚）：
 
 ```powershell
-mvn compile exec:java "-Dexec.mainClass=DatabaseConnectionTest"
+mvn compile exec:java "-Dexec.mainClass=com.example.rag.cli.DatabaseConnectionTest"
 ```
 
 运行持久化多轮用户画像测试（输入 `exit` 结束）：
 
 ```powershell
-mvn compile exec:java "-Dexec.mainClass=UserProfileConversationTest"
+mvn compile exec:java "-Dexec.mainClass=com.example.rag.cli.UserProfileConversationTest"
 ```
 
 不提供参数时，程序会为本次运行生成一个独立的测试用户，避免读取上一次测试遗留的画像。终端输入使用 JVM 当前默认编码；在中文 Windows 环境中通常为 GBK，避免强制按 UTF-8 读取造成乱码。
@@ -176,7 +176,7 @@ mvn compile exec:java "-Dexec.mainClass=UserProfileConversationTest"
 如果需要跨多次运行继续测试同一个用户，可以明确指定稳定的用户 ID：
 
 ```powershell
-mvn compile exec:java "-Dexec.mainClass=UserProfileConversationTest" "-Dexec.args=profile-test-user-001"
+mvn compile exec:java "-Dexec.mainClass=com.example.rag.cli.UserProfileConversationTest" "-Dexec.args=profile-test-user-001"
 ```
 
 指定相同 ID 会有意复用该用户在 PostgreSQL 中的历史画像；需要测试全新画像时不要传入 ID，或者改用新的 ID。
@@ -201,7 +201,7 @@ docker compose stop postgres
 
 ## Spring Boot 后端
 
-正式后端入口为 `com.example.rag.RagApplication`。旧的命令行测试类暂时保留，用于验证模型和 RAG 链路，但 WebApp 后续只调用 Spring Boot HTTP API。
+正式后端入口为 `com.example.rag.RagApplication`。命令行工具与测试类统一放在 `com.example.rag.cli` 包下（`LLMTest` 已删除；`DocumentExtractor` 是文档提取工具，其余几个用于验证模型和 RAG 链路）。`src/main/java` 根目录不放类：默认包里的类无法被命名包 import，Spring 的服务就永远复用不了它。WebApp 后续只调用 Spring Boot HTTP API。
 
 先启动 PostgreSQL：
 

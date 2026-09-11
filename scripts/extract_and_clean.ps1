@@ -19,7 +19,7 @@ New-Item -ItemType Directory -Force (Split-Path -Parent $cleanedPath) | Out-Null
 
 Push-Location $projectRoot
 try {
-    & mvn compile exec:java "-Dexec.mainClass=DocumentExtractor" "-Dexec.args='$inputPath' '$extractedPath'"
+    & mvn compile exec:java "-Dexec.mainClass=com.example.rag.cli.DocumentExtractor" "-Dexec.args='$inputPath' '$extractedPath'"
     if ($LASTEXITCODE -ne 0) {
         throw "Tika 文档提取失败，退出码: $LASTEXITCODE"
     }

@@ -1,3 +1,5 @@
+package com.example.rag.cli;
+
 import com.google.gson.JsonObject;
 import com.example.rag.profile.ConversationRepository;
 import com.example.rag.profile.MessageRepository;

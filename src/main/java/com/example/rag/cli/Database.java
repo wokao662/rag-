@@ -1,3 +1,5 @@
+package com.example.rag.cli;
+
 import com.example.rag.AppConfig;
 
 import java.sql.Connection;
