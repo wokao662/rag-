@@ -1,5 +1,7 @@
 package com.example.rag.recommendation;
 
+import com.example.rag.observability.ModelReply;
+import com.example.rag.observability.TokenUsage;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -81,7 +83,8 @@ public final class RecommendationChatClient implements AutoCloseable {
         this.apiKey = apiKey;
     }
 
-    public JsonObject generate(JsonObject profile, String queryText, JsonArray knowledge) throws IOException {
+    public ModelReply<JsonObject> generate(JsonObject profile, String queryText, JsonArray knowledge)
+            throws IOException {
         JsonObject body = new JsonObject();
         body.addProperty("model", MODEL);
         body.addProperty("temperature", 0.1);
@@ -124,9 +127,13 @@ public final class RecommendationChatClient implements AutoCloseable {
             }
             try {
                 JsonObject apiResponse = JsonParser.parseString(responseBody).getAsJsonObject();
+                // usage 与 choices 同层。这一路是三个调用里最贵也最慢的（max_tokens=1400，
+                // 实测 80-89 秒，readTimeout 是 90 秒），所以它最需要用量数据来判定
+                // 到底该裁知识负载还是该压 max_tokens。
+                TokenUsage usage = TokenUsage.fromApi(apiResponse);
                 String content = apiResponse.getAsJsonArray("choices").get(0).getAsJsonObject()
                         .getAsJsonObject("message").get("content").getAsString();
-                return JsonParser.parseString(content).getAsJsonObject();
+                return new ModelReply<>(JsonParser.parseString(content).getAsJsonObject(), usage);
             } catch (RuntimeException error) {
                 throw new IOException("推荐模型没有返回合法 JSON", error);
             }

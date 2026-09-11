@@ -1,5 +1,6 @@
 package com.example.rag.recommendation;
 
+import com.example.rag.profile.BehaviorObservationService;
 import com.example.rag.profile.MessageRepository;
 import com.example.rag.profile.UserRepository;
 import com.google.gson.JsonArray;
@@ -35,14 +36,20 @@ public class RecommendationHistoryService {
 
     private final DataSource dataSource;
     private final TransactionTemplate transactions;
+    private final StrategyGovernanceService governance;
+    private final BehaviorObservationService observations;
     private final UserRepository users = new UserRepository();
     private final MessageRepository messages = new MessageRepository();
     private final FeedbackRepository likes = new FeedbackRepository();
     private final TrialFeedbackRepository trials = new TrialFeedbackRepository();
 
-    public RecommendationHistoryService(DataSource dataSource, TransactionTemplate transactions) {
+    public RecommendationHistoryService(DataSource dataSource, TransactionTemplate transactions,
+                                        StrategyGovernanceService governance,
+                                        BehaviorObservationService observations) {
         this.dataSource = dataSource;
         this.transactions = transactions;
+        this.governance = governance;
+        this.observations = observations;
     }
 
     /** 读取该用户历史上收到过的全部推荐，并带上点赞与尝试后反馈的当前状态。 */
@@ -105,8 +112,10 @@ public class RecommendationHistoryService {
             throw new IllegalArgumentException("反馈内容不能为空");
         }
         String normalizedStrategyId = strategyId.trim();
-        return inTransaction(connection -> {
+        UUID[] userHolder = new UUID[1];
+        TrialState state = inTransaction(connection -> {
             UUID userId = requireUser(connection, normalizedId);
+            userHolder[0] = userId;
             // 只能对系统真的推荐过的方法反馈。少了这一步，任何人都能凭空对任意 strategyId
             // 提交反馈，直接污染驱动渐进投放升降权的统计数据。
             if (!messages.wasRecommendedTo(connection, userId, normalizedStrategyId)) {
@@ -120,8 +129,16 @@ public class RecommendationHistoryService {
             TrialFeedbackRepository.TrialFeedback saved = trials.save(
                     connection, userId, normalizedStrategyId, submission.tried(),
                     submission.outcome(), submission.note(), sourceMessageId);
+            // 同一事务内重算，保证反馈与分数不会处于“已写入但未生效”的中间态：
+            // 分数是派生值，跟反馈一起提交或一起回滚。TransactionTemplate 默认 REQUIRED，
+            // 这里会加入当前事务而不是新开一个。
+            governance.recalculate(normalizedStrategyId);
             return toTrialState(saved);
         });
+        // 提交反馈本身也是行为，观测同样要在事务提交后重算：methods_tried 与 helpful_rate
+        // 是失真觉察最直接的对照面，用户可能提完反馈就不再发消息，不能停在上一轮的值。
+        observations.refresh(userHolder[0]);
+        return state;
     }
 
     private static TrialState toTrialState(TrialFeedbackRepository.TrialFeedback trial) {

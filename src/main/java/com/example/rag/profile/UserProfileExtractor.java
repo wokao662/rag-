@@ -1,5 +1,7 @@
 package com.example.rag.profile;
 
+import com.example.rag.observability.ModelReply;
+import com.example.rag.observability.TokenUsage;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
@@ -69,7 +71,7 @@ public final class UserProfileExtractor implements AutoCloseable {
         this.apiKey = apiKey;
     }
 
-    public JsonObject extract(
+    public ModelReply<JsonObject> extract(
             JsonObject existingProfile,
             List<MessageRepository.StoredMessage> recentMessages,
             String currentMessage
@@ -112,6 +114,8 @@ public final class UserProfileExtractor implements AutoCloseable {
                 throw new IOException("画像抽取请求失败 (HTTP " + response.code() + "): " + responseBody);
             }
             JsonObject apiResponse = JsonParser.parseString(responseBody).getAsJsonObject();
+            // usage 与 choices 同层。此前解析完 content 就把整个 apiResponse 丢掉了，用量跟着一起丢。
+            TokenUsage usage = TokenUsage.fromApi(apiResponse);
             String content = apiResponse.getAsJsonArray("choices").get(0).getAsJsonObject()
                     .getAsJsonObject("message").get("content").getAsString();
             try {
@@ -119,7 +123,7 @@ public final class UserProfileExtractor implements AutoCloseable {
                 if (!extraction.has("updates") || !extraction.get("updates").isJsonObject()) {
                     throw new IllegalArgumentException("缺少updates对象");
                 }
-                return extraction;
+                return new ModelReply<>(extraction, usage);
             } catch (RuntimeException error) {
                 throw new IOException("画像模型没有返回规定JSON：" + content, error);
             }

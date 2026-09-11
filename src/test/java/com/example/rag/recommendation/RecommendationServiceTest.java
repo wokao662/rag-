@@ -4,6 +4,9 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+import java.util.Set;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -41,6 +44,34 @@ class RecommendationServiceTest {
 
         assertEquals(1, merged.size());
         assertTrue(merged.get(0).getAsJsonObject().has("retrievalScore"));
+    }
+
+    @Test
+    void strategyIdsDeduplicateAndKeepRetrievalOrder() {
+        JsonArray hits = new JsonArray();
+        hits.add(point("chunk-1", "strategy-b"));
+        hits.add(point("chunk-2", "strategy-a"));
+        hits.add(point("chunk-3", "strategy-b"));
+
+        // 去重后仍按召回顺序：补齐 chunk 时的查询顺序与相似度排序一致。
+        assertEquals(List.of("strategy-b", "strategy-a"), RecommendationService.strategyIdsOf(hits));
+        assertEquals(List.of(), RecommendationService.strategyIdsOf(new JsonArray()));
+    }
+
+    @Test
+    void gateFilterDropsBlockedStrategiesOnly() {
+        JsonArray hits = new JsonArray();
+        hits.add(point("chunk-1", "strategy-a"));
+        hits.add(point("chunk-2", "strategy-b"));
+        hits.add(point("chunk-3", "strategy-a"));
+
+        JsonArray admitted = RecommendationService.admitByGate(hits, Set.of("strategy-a"));
+
+        // 同一策略的多个命中要么全留要么全走，闸门粒度是策略不是 chunk。
+        assertEquals(2, admitted.size());
+        assertEquals("chunk-1", admitted.get(0).getAsJsonObject().get("id").getAsString());
+        assertEquals("chunk-3", admitted.get(1).getAsJsonObject().get("id").getAsString());
+        assertEquals(0, RecommendationService.admitByGate(hits, Set.of()).size());
     }
 
     private static JsonObject knowledgeItem(String chunkId) {
