@@ -32,19 +32,55 @@ public class AccessCodeService {
     /**
      * 校验访问码并返回绑定的用户标识与角色；访问码本身即 externalId，首次使用自动建用户。
      *
-     * <p>角色随兑换结果一起返回，而不是让调用方再查一次：前端需要它决定是否展示审核入口，
-     * 而审核类端点尚未实现，这是 role 列当前的运行时消费点。
+     * <p>角色随兑换结果一起返回，而不是让调用方再查一次：前端需要它决定是否展示审核入口。
      */
     public Redemption redeem(String code) {
         String normalized = normalize(code);
         return inTransaction(connection -> {
-            // 一次查询同时确认有效性与角色，不再单独调 isActive：两者的 WHERE 条件相同，
+            // 一次查询同时确认有效性、角色与人名，不再单独调 isActive：三者的 WHERE 条件相同，
             // 分开查就是多一趟数据库往返，而且两次查询之间理论上可能读到不同的行。
-            String role = accessCodes.roleOf(connection, normalized)
+            String role = accessCodes.accessOf(connection, normalized)
+                    .map(AccessCodeRepository.Access::role)
                     .orElseThrow(() -> new UnauthorizedException("访问码无效或已被停用"));
             users.findOrCreateByExternalId(connection, normalized);
             accessCodes.touchLastUsed(connection, normalized);
             return new Redemption(normalized, role);
+        });
+    }
+
+    /**
+     * 校验审核资格，返回审核者身份。
+     *
+     * <p>三种失败分开报，因为它们要求调用方做的事不同：
+     * <ul>
+     *   <li>码为空、格式错、不存在或已停用 → {@link UnauthorizedException}（401，换一个码）；</li>
+     *   <li>码有效但角色是 tester → {@link ForbiddenException}（403，这个码没资格）；</li>
+     *   <li>码是 reviewer 却没有人名 → {@link ForbiddenException}（403，发码的人得先补 label）。</li>
+     * </ul>
+     * 第三种已经被 V10 的 {@code access_codes_reviewer_label_check} 挡住，这里再查一次不是
+     * 重复保险：{@code reviewed_by} 要写人名，而人名一旦落成 NULL，“谁审的”就永久丢了，
+     * 且无法从库里还原。宁可当场拒一次审核，也不要一条没有签字人的审核记录。
+     *
+     * <p>不走 {@link #isAllowed} 的开发模式放行：审核是跨用户的特权动作，而“表里一张码都没”
+     * 只能证明本地还没发码，不能证明请求者有审核资格。这里一律失败关闭。
+     *
+     * <p>不写 {@code last_used_at}：待审列表会被审核界面反复拉取，每次拉取都写一行会产生
+     * 无意义的行锁与表膨胀，而“这个码最后一次用在哪天”对审核审计没有价值（{@code reviewed_at}
+     * 才是）。
+     */
+    public Reviewer requireReviewer(String code) {
+        String normalized = normalize(code);
+        return inTransaction(connection -> {
+            AccessCodeRepository.Access access = accessCodes.accessOf(connection, normalized)
+                    .orElseThrow(() -> new UnauthorizedException("访问码无效或已被停用"));
+            if (!ROLE_REVIEWER.equals(access.role())) {
+                throw new ForbiddenException("该访问码没有审核资格");
+            }
+            String label = access.label();
+            if (label == null || label.isBlank()) {
+                throw new ForbiddenException("审核者访问码缺少人名（label），无法记录审核者");
+            }
+            return new Reviewer(normalized, label.trim());
         });
     }
 
@@ -94,7 +130,21 @@ public class AccessCodeService {
     public record Redemption(String externalId, String role) {
     }
 
+    /**
+     * 审核者身份。
+     *
+     * @param code  已规范化的访问码
+     * @param label 人名，写进 {@code strategies.reviewed_by}；已保证非空非空白
+     */
+    public record Reviewer(String code, String label) {
+    }
+
     public static final class UnauthorizedException extends RuntimeException {
         public UnauthorizedException(String message) { super(message); }
+    }
+
+    /** 身份没问题、资格不够。与 401 分开：401 该重新登录，403 重新登录也没用。 */
+    public static final class ForbiddenException extends RuntimeException {
+        public ForbiddenException(String message) { super(message); }
     }
 }

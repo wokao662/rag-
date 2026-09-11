@@ -36,7 +36,7 @@
 - `recommendation_feedback`：卡片上的 👍，只汇总给投稿者看，不参与推荐度计算。
 - `method_trial_feedback`：尝试后反馈，驱动升降权的**唯一**信号。
 - `model_call_logs`：模型决策日志，含输入输出快照、耗时与 token 用量，写入前脱敏，按保留期自动清理。
-- `access_codes`：测试期访问码，一个码对应一个独立用户空间。V9 起每个码带 `role`（`tester` / `reviewer`），角色属于码而不属于用户，由 `POST /api/v1/auth/redeem` 返回给前端。
+- `access_codes`：测试期访问码，一个码对应一个独立用户空间。V9 起每个码带 `role`（`tester` / `reviewer`），角色属于码而不属于用户，由 `POST /api/v1/auth/redeem` 返回给前端。V10 起 `reviewer` 码必须有 `label`（人名），因为审核记录要落人名而不是凭据。
 - `strategies` / `sources` / `strategy_chunks` / `strategy_exposures`：策略存储层与曝光去重。
 - `behavior_observations`：行为观测聚合值，只采集不使用。
 - 未来增加：画像历史版本、投稿队列与审核审计。
@@ -196,7 +196,7 @@ Embedding 模型只负责把文本转换为向量。未来的用户画像模型�
 | `helpful_count` | 认为有效的人数（只计 `outcome='helpful'`，`partial` 不算） | `StrategyGovernanceService` | 同上 |
 | `overall_score` | 合成总分 = 0.3×证据 + 0.5×社区 + 0.2×有效性 | `StrategyGovernanceService` | 同上 |
 | `exposed_user_count` / `exposure_state` / `pending_archive` | 投放状态，从 `strategy_exposures` 与反馈推导 | `StrategyGovernanceService` | 同上 |
-| `reviewer_score` | 审核者自己的判断，可空 | 审核界面（尚未实现） | 审核时确定 |
+| `reviewer_score` | 审核者自己的判断；通过时必填，驳回时可空 | 审核端点 `POST .../reviews/{strategyId}/decision` | 审核时确定 |
 
 除 `evidence_score` / `effectiveness_score` / `reviewer_score` 外全是**派生值**，应用启动时从 `method_trial_feedback` 与 `strategy_exposures` 整体重建一次。公式只存在 `StrategyGovernanceService` 一处，导入器与人工改分都不自己算，避免同一公式被复制成两份而逐渐走偏。这也意味着删掉派生列的内容不是事故，重启就能恢复。
 
@@ -206,7 +206,9 @@ Embedding 模型只负责把文本转换为向量。未来的用户画像模型�
 
 此前记录的缺口已补齐：`tried_count`/`helpful_count` 现在由反馈提交触发重算（同事务内），`community_score` 与二者的换算关系已定义（Wilson 下界 + 最小样本量 10），Java 侧不仅读取而且把它们接成了运行时闸门。
 
-仍然缺的：`reviewer_score` 无写入者（审核界面未实现）；`effectiveness_score` 目前只从档案导入，没有审核者也没有模型写它；`overall_score` 已落库但未参与排序。
+已经补齐的：`reviewer_score` 与 `effectiveness_score` 现在都有了写入者——审核决定接口（见《人工审核端点》），V10 另给 `reviewer_score` 加了 0–1 的 CHECK 约束，因为一个 7.5 分的“审核者判断”能永久污染训练集。
+
+仍然缺的：`overall_score` 已落库但**未参与排序**；审核**界面**未做（端点已可用，界面是独立任务，它只需要读 `redeem` 返回的 `role` 决定是否展示入口）。
 
 此前本节曾建议 `predictedBaseScore`/`editorScore`/`feedbackScore`/`rankingScore` 四分体系，与数据实际字段不一致且未落地。四分体系并非错误，但它描述的职责已由上表承担；保留两套只会造成写入者不清。本节以数据库实际列为准。
 
@@ -237,6 +239,31 @@ Embedding 模型只负责把文本转换为向量。未来的用户画像模型�
 
 投稿没有权威来源，但入库流程硬校验 `sourceIds` 不能为空，因此需要新增一类来源（如 `user_submission`），其 `evidenceScore` 固定为低值。这也对应“正规来源中的明确描述优先于模型预测”的原则。
 
+### 人工审核端点
+
+已实现（分支 `feature/strategy-review`，迁移 V10）。两个端点：
+
+| 端点 | 作用 |
+| --- | --- |
+| `GET /api/v1/users/{externalId}/reviews/pending` | 待审队列：所有 `review_status` 不是 `approved`/`archived` 的策略，附 `stepCount` 与 `chunkCount` |
+| `POST /api/v1/users/{externalId}/reviews/{strategyId}/decision` | 落审核决定（`approved`/`rejected`），同时是补 `evidenceScore`/`effectivenessScore` 的唯一入口 |
+
+**为什么挂在 `/api/v1/users/{externalId}/` 下而不是新开 `/api/v1/reviews/`**：`AccessCodeFilter` 只匹配 `^/api/v1/users/([^/]+)(?:/.*)?$`，不匹配就直接放行。新开前缀意味着要再写一套鉴权，且会留下一个公网裸奔的管理端点——正是《已知风险》里投稿接口那条警告描述的同一类错误。挂在用户空间下则自动继承过滤器，身份直接取自路径，不需要客户端另传一个身份标识。`AccessCodeFilterTest#doesNotCoverPrefixesOutsideUserSpace` 把这个缺口写成了一条会失败的测试，将来有人挂错前缀会立刻看到。
+
+**两层防线分工明确**：过滤器层管“你是不是你”（请求头的码必须等于路径里的 `externalId`，否则 401）；服务层 `AccessCodeService.requireReviewer` 管“你有没有资格”（`role` 必须是 `reviewer`，否则 403）。两者分开报是因为客户端该做的事不同：401 该重新登录，403 重新登录也没用。
+
+**审核端点不参与开发模式放行**：`access_codes` 表为空时过滤器放行一切请求（方便本地开发），但 `requireReviewer` 查不到码照样抛 401。资格校验是失败关闭的。
+
+**队列里带 `stepCount`/`chunkCount` 的用意**：审核者要判的第一件事是这份档案完不完整。`steps` 是空数组的策略（现有 2 个）推中时会产生空的 `methodSteps`，`chunkCount` 为 1 的策略（现有 1 个）内容深度不足。这两个数字让审核者不打开 JSON 就能看见问题。`stepCount` 用 `jsonb_typeof` 守卫，否则一份 `steps` 写坏的档案会让整个列表 500。
+
+三条业务规则：
+
+1. `approved` 必须带 `reviewerScore`（0–1），`rejected` 可以不带。理由是通过却不给判断分，等于销毁一条训练标签。
+2. `null` 不等于 0 分。决定请求里没给的分数保持原值（SQL 用 `COALESCE`），只有显式传 0 才写 0。否则驳回一个策略会顺手把它的证据分清零。
+3. 补分与重算在**同一事务**里。写完分数立刻调 `governance.recalculate`，不留“分数写了但合成分还是旧的”的窗口。已实测：给 `strategy-spaced-learning` 补 `evidenceScore=0.7`/`effectivenessScore=0.65`，`overall_score` 从 0 变成 0.34（= 0.3×0.7 + 0.5×0 + 0.2×0.65，社区分为 0 是因为还没有任何真实反馈）。
+
+**审核不动 `exposure_state`，也不动 `pending_archive`**：投放档位只由真实反馈驱动，归档只由人工确认驱动。审核通过只是打开闸门让它有资格被曝光，不等于扩大曝光范围。
+
 ### 渐进投放
 
 新入库策略先只对少量用户曝光，反馈达标后逐步扩大范围；反馈持续偏低则降权，低到一定程度进入待归档审查。
@@ -261,17 +288,20 @@ Embedding 模型只负责把文本转换为向量。未来的用户画像模型�
 - **执行后反馈档位**：已实现为 `method_trial_feedback`，是升降权的唯一依据；`adopted`/`dismissed` 已退役。
 - **升权与降权速度是否不对称**：目前对称（同一个 Wilson 下界同时驱动升档与待归档），但下界本身对失败更敏感：10/20 的下界约 0.30 刚好卡在 `LOW_COMMUNITY` 上，而 5/10 约 0.24 会直接进待归档。
 
+- **审核权限的强制点在服务层，不在过滤器**：过滤器只校验“码 == 路径里的 externalId”，它不知道角色；角色校验由 `AccessCodeService.requireReviewer` 承担，因为资格是业务规则，将来“审核者不能审自己的投稿”之类的规则也要落在同一层。401（身份不对）与 403（资格不够）分开报。
+- **`reviewed_by` 写 `label`（审核者人名），不写访问码**：码是凭据，而这一列要在审核界面和接口响应里展示。V10 把该列从 `VARCHAR(64)` 加宽到 128，并给 `access_codes` 加了 `role <> 'reviewer' OR label IS NOT NULL` 的 CHECK，同时给 `reviewer_score` 加了 0–1 的 CHECK——一个 7.5 分的“审核者判断”会永久污染训练集。
+- **同一人不得审自己投的稿**：规则已定，但暂不写拦截代码。现存 13 个策略的 `submitted_by` 全为 NULL，投稿入口也还没做，写了就是永远走不到的代码加它的测试。投稿接口落地时一并实现。
+
 仍未定：
 
 - 投稿者能否查看自己投稿的状态与被采纳次数。这对投稿意愿是强激励，也最贴合传承的初心。`strategies.submitted_by` 已预留，但无查询接口。
-- 审核权限在哪一层强制。角色本身已定（V9 的 `access_codes.role`，`tester` / `reviewer`，由 `redeem` 返回），但没有审核端点去校验它，所以 `reviewer` 当前只是身份告知；`strategies.reviewed_by` 仍只是个无人写入的 `VARCHAR(64)`，也没定下写访问码还是写 `label`。这直接卡住了 `review-gate` 能否开启。
 - 按比例随机曝光或按用户分群是否需要。当前只有人数上限，命中哪些用户完全由向量相似度决定，不是随机分配——这会引入选择偏差（只有画像匹配的人才被曝光），将来做统计推断时必须考虑。
 
 ### 已知风险
 
 **冷启动的双边市场问题**：库内容少 -> 推荐质量差 -> 用户不愿投稿 -> 库仍然少。种子语料必须先于投稿功能就绪。
 
-**审核工作量会成为吞吐瓶颈**：投稿一律人审。V9 起可以发放 `reviewer` 角色的访问码，但审核端点未实现，实际审核者数量仍为一。每条投稿需要判断方法、适合人群与模型推荐度是否有依据，投稿量上升后人工审核会先于技术能力达到上限。审核界面需为此优化（预填模型判断、批量操作），并考虑限制投稿速率。
+**审核工作量会成为吞吐瓶颈**：投稿一律人审。V10 起审核端点可用，实际能审的人数等于发出去的 `reviewer` 访问码数量——现在只有一张，所以瓶颈是组织问题而不是技术问题，多发码即可缓解，但每张码都意味着一份审核责任。每条投稿需要判断方法、适合人群与模型推荐度是否有依据，投稿量上升后人工审核会先于技术能力达到上限。审核界面需为此优化（预填模型判断、批量操作），并考虑限制投稿速率。界面尚未做，端点已可支撑它。
 
 **投稿接口是成本放大攻击面**：`AccessCodeFilter` 仅拦截 `^/api/v1/users/([^/]+)(?:/.*)?$`。若投稿接口命名为 `/api/v1/strategies/**`，则完全不受访问码保护，公网部署后任何人可提交并触发模型初判，刷爆 API 预算并用垃圾淹没审核队列。对策：投稿接口纳入 `/api/v1/users/{externalId}/` 前缀以复用现有过滤器；模型初判不在提交时同步执行，改为队列或审核者点开时触发；加投稿频率限制。
 

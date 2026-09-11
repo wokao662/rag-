@@ -5,6 +5,7 @@ import com.example.rag.profile.UserProfileService;
 import com.example.rag.recommendation.FeedbackService;
 import com.example.rag.recommendation.RecommendationHistoryService;
 import com.example.rag.recommendation.RecommendationService;
+import com.example.rag.recommendation.StrategyReviewService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import org.springframework.dao.DataAccessException;
@@ -30,9 +31,19 @@ public class ApiExceptionHandler {
         return problem(HttpStatus.UNAUTHORIZED, "未授权", error.getMessage(), request);
     }
 
+    /**
+     * 身份没问题、资格不够。与 401 分开报，因为客户端该做的事不同：
+     * 401 该重新输码，403 重新输同一个码也没用——得换一张 reviewer 码。
+     */
+    @ExceptionHandler(AccessCodeService.ForbiddenException.class)
+    ResponseEntity<ProblemDetail> forbidden(RuntimeException error, HttpServletRequest request) {
+        return problem(HttpStatus.FORBIDDEN, "无权限", error.getMessage(), request);
+    }
+
     @ExceptionHandler({UserProfileService.ProfileNotFoundException.class,
             UserProfileService.ConversationNotFoundException.class,
             FeedbackService.FeedbackNotFoundException.class,
+            StrategyReviewService.StrategyNotFoundException.class,
             RecommendationHistoryService.StrategyNotRecommendedException.class})
     ResponseEntity<ProblemDetail> notFound(RuntimeException error, HttpServletRequest request) {
         return problem(HttpStatus.NOT_FOUND, "资源不存在", error.getMessage(), request);

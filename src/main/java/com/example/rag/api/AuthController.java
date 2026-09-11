@@ -35,7 +35,8 @@ public class AuthController {
 
     /**
      * @param role {@code tester} 或 {@code reviewer}；前端据此决定是否展示审核入口。
-     *             审核类端点本身尚未实现，所以这里只告知身份，不做权限拦截。
+     *             这里只告知身份，不做权限拦截：隐藏按钮是体验，真正的防线在
+     *             {@link ReviewController} 那一侧——拿 tester 码直接发请求也会被挡回 403。
      */
     public record RedeemResponse(String externalId, String role) {
     }
