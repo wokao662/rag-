@@ -75,7 +75,7 @@ public final class RecommendationChatClient implements AutoCloseable {
     private final String apiKey;
     private final OkHttpClient client = new OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(90, TimeUnit.SECONDS)
+            .readTimeout(120, TimeUnit.SECONDS)
             .build();
 
     public RecommendationChatClient(String apiKey) {
@@ -88,7 +88,7 @@ public final class RecommendationChatClient implements AutoCloseable {
         JsonObject body = new JsonObject();
         body.addProperty("model", MODEL);
         body.addProperty("temperature", 0.1);
-        body.addProperty("max_tokens", 1400);
+        body.addProperty("max_tokens", 1200);
         body.addProperty("stream", false);
         body.addProperty("enable_thinking", false);
         JsonObject responseFormat = new JsonObject();
@@ -127,9 +127,9 @@ public final class RecommendationChatClient implements AutoCloseable {
             }
             try {
                 JsonObject apiResponse = JsonParser.parseString(responseBody).getAsJsonObject();
-                // usage 与 choices 同层。这一路是三个调用里最贵也最慢的（max_tokens=1400，
-                // 实测 80-89 秒，readTimeout 是 90 秒），所以它最需要用量数据来判定
-                // 到底该裁知识负载还是该压 max_tokens。
+                // usage 与 choices 同层。这一路是三个调用里最贵也最慢的（max_tokens=1200，
+                // 按实测速率下限 10 token/s 约 113 秒，readTimeout 是 120 秒），所以它最需要
+                // 用量数据来判定到底该裁知识负载还是该压 max_tokens。
                 TokenUsage usage = TokenUsage.fromApi(apiResponse);
                 String content = apiResponse.getAsJsonArray("choices").get(0).getAsJsonObject()
                         .getAsJsonObject("message").get("content").getAsString();
