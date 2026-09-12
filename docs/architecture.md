@@ -260,7 +260,7 @@ Embedding 模型只负责把文本转换为向量。未来的用户画像模型�
 
 1. `approved` 必须带 `reviewerScore`（0–1），`rejected` 可以不带。理由是通过却不给判断分，等于销毁一条训练标签。
 2. `null` 不等于 0 分。决定请求里没给的分数保持原值（SQL 用 `COALESCE`），只有显式传 0 才写 0。否则驳回一个策略会顺手把它的证据分清零。
-3. 补分与重算在**同一事务**里。写完分数立刻调 `governance.recalculate`，不留“分数写了但合成分还是旧的”的窗口。已实测：给 `strategy-spaced-learning` 补 `evidenceScore=0.7`/`effectivenessScore=0.65`，`overall_score` 从 0 变成 0.34（= 0.3×0.7 + 0.5×0 + 0.2×0.65，社区分为 0 是因为还没有任何真实反馈）。
+3. 补分与重算在**同一事务**里。写完分数立刻调 `governance.recalculate`，不留“分数写了但合成分还是旧的”的窗口。已实测：2026-09-12 审核决定给 `strategy-spaced-learning` 补 `evidenceScore=0.9`/`effectivenessScore=0.8`（approved），`overall_score` 从 0 重算为 0.43（= 0.3×0.9 + 0.5×0 + 0.2×0.8，社区分为 0 是因为还没有任何真实反馈）。
 
 **审核不动 `exposure_state`，也不动 `pending_archive`**：投放档位只由真实反馈驱动，归档只由人工确认驱动。审核通过只是打开闸门让它有资格被曝光，不等于扩大曝光范围。
 
