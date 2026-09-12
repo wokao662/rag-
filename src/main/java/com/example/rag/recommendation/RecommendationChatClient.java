@@ -88,7 +88,7 @@ public final class RecommendationChatClient implements AutoCloseable {
         JsonObject body = new JsonObject();
         body.addProperty("model", MODEL);
         body.addProperty("temperature", 0.1);
-        body.addProperty("max_tokens", 800);
+        body.addProperty("max_tokens", 1200);
         body.addProperty("stream", false);
         body.addProperty("enable_thinking", false);
         JsonObject responseFormat = new JsonObject();
@@ -127,8 +127,8 @@ public final class RecommendationChatClient implements AutoCloseable {
             }
             try {
                 JsonObject apiResponse = JsonParser.parseString(responseBody).getAsJsonObject();
-                // usage 与 choices 同层。这一路是三个调用里最贵也最慢的（max_tokens=800，
-                // 按实测速率下限 10 token/s 约 80 秒，readTimeout 是 120 秒），所以它最需要
+                // usage 与 choices 同层。这一路是三个调用里最贵也最慢的（max_tokens=1200，
+                // 按实测速率下限 10 token/s 约 113 秒，readTimeout 是 120 秒），所以它最需要
                 // 用量数据来判定到底该裁知识负载还是该压 max_tokens。
                 TokenUsage usage = TokenUsage.fromApi(apiResponse);
                 String content = apiResponse.getAsJsonArray("choices").get(0).getAsJsonObject()
