@@ -105,6 +105,8 @@
 
 **验收方式**：维护者核对引用证明，并跑 `mvn test` 复验。
 
+**完成记录**：2026-09-12，分支 `task/04-default-package-cleanup`，PR #19。5 个类的归宿：LLMTest 删除（无引用死代码），Database / DatabaseConnectionTest / UserProfileConversationTest 搬入 `com.example.rag.cli`，DocumentExtractor 经 review 后搬入 `com.example.rag.cli` 并同步更新 `scripts/extract_and_clean.ps1` 引用；README 命令行示例同步更新。
+
 ## 任务 ⑤ 部署手册与演练
 
 **目标**：把项目部署到云服务器并启用访问码，全程记录成可复用手册。
