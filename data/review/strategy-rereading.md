@@ -9,7 +9,7 @@
 | sourceIds → 文件存在 | ✅ source-006 存在 |
 | 来源身份 | Dunlosky, Rawson, Marsh, Nathan & Willingham (2013), *Psychological Science in the Public Interest*，DOI 可解析 |
 | 内容支撑性 | ✅ 该综述将「重复阅读」（rereading）评为低实用性（low utility）——有即时收益但远逊练习测试与间隔练习，与本策略 0.2/0.2 的低分定位一致 |
-| verification 状态 | ⚠️ pending |
+| verification 状态 | ⚠ pending |
 
 结论：**来源真实且对口，可支撑本策略**。与画线/高亮同属"诚实低分样本"，不应剔除。
 
@@ -17,7 +17,7 @@
 
 - 共 8 块（定义 1、步骤 4、适合 1、不适合 2），与档案一致
 - 结构：✅ 无重复、无截断、自包含
-- 深度：⚠️ 步骤笼统，语料填厚阶段处理
+- 深度：⚠ 步骤笼统，语料填厚阶段处理
 
 ## 3. 人群标签初稿
 

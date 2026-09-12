@@ -9,7 +9,7 @@
 | sourceIds → 文件存在 | ✅ source-004 存在 |
 | 来源身份 | 《学习动机与学习策略研究》（1999，心理发展与教育期刊） |
 | 内容支撑性 | ✅ 来源确实是动机/策略分类的实证研究，与策略 summary 描述一致 |
-| verification 状态 | ⚠️ pending |
+| verification 状态 | ⚠ pending |
 
 结论：**来源真实且对口**——但注意：来源对口的是"背景知识"，不是"可执行方法"（见第 3、4 节）。
 
@@ -47,5 +47,4 @@
 ## 6. 关联问题
 
 - 背景知识定性待拍板 → 见问题表 Q-NOSTEP
-- 文件名与 strategyId 不一致（文件叫 source-004.json，strategyId 却是 strategy-learning-motivation-types）→ 见问题表 Q-FILENAME
 - 来源 verification 待办 → 见问题表 Q-SRC

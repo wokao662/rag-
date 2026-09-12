@@ -9,7 +9,7 @@
 | sourceIds → 文件存在 | ✅ source-006 存在 |
 | 来源身份 | Dunlosky, Rawson, Marsh, Nathan & Willingham (2013), *Psychological Science in the Public Interest*，DOI 可解析 |
 | 内容支撑性 | ✅ 该综述评估了「自我解释」（self-explanation），评为中等实用性（moderate utility），尤其对数学/科学问题解决类学习有稳定收益，与策略定义、适用人群一致 |
-| verification 状态 | ⚠️ pending |
+| verification 状态 | ⚠ pending |
 
 结论：**来源真实且对口，可支撑本策略**。
 
@@ -17,7 +17,7 @@
 
 - 共 10 块（定义 1、步骤 5、适合 2、不适合 2），与档案一致
 - 结构：✅ 无重复、无截断、自包含
-- 深度：⚠️ 步骤笼统（"用自己的话解释"级别，缺"解释不出来怎么办"的引导），语料填厚阶段处理
+- 深度：⚠ 步骤笼统（"用自己的话解释"级别，缺"解释不出来怎么办"的引导），语料填厚阶段处理
 
 ## 3. 人群标签初稿
 

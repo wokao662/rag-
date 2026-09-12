@@ -9,7 +9,7 @@
 | sourceIds → 文件存在 | ✅ source-006 存在 |
 | 来源身份 | Dunlosky, Rawson, Marsh, Nathan & Willingham (2013), *Psychological Science in the Public Interest*，DOI 可解析 |
 | 内容支撑性 | ✅ 该综述评估了「精细化提问」（elaborative interrogation），评为中等实用性（moderate utility），与策略定义、步骤、适用人群一致 |
-| verification 状态 | ⚠️ pending（与 4/5 来源一样，待审核流程核验证） |
+| verification 状态 | ⚠ pending（与 4/5 来源一样，待审核流程核验证） |
 
 结论：**来源真实且对口，可支撑本策略**。
 
@@ -17,7 +17,7 @@
 
 - 共 10 块（定义 1、步骤 5、适合 2、不适合 2），与档案 steps/suitableFor/notSuitableFor 数量一致
 - 结构：✅ 无重复、无截断；各块单独可读、自包含
-- 深度：⚠️ 与库内整体水平一致，步骤表述偏笼统（缺"问什么问题、怎么自问自答"的示例），属语料填厚阶段处理
+- 深度：⚠ 与库内整体水平一致，步骤表述偏笼统（缺"问什么问题、怎么自问自答"的示例），属语料填厚阶段处理
 
 ## 3. 人群标签初稿
 

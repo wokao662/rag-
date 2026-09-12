@@ -9,7 +9,7 @@
 | sourceIds → 文件存在 | ✅ source-006 存在 |
 | 来源身份 | Dunlosky, Rawson, Marsh, Nathan & Willingham (2013), *Psychological Science in the Public Interest*，DOI 可解析 |
 | 内容支撑性 | ✅ 该综述评估了「关键词助记」（keyword mnemonic），评为低实用性（low utility）——对特定配对记忆短期有效，但难以推广到长期记忆与深层理解，与本策略低分和适用面一致 |
-| verification 状态 | ⚠️ pending |
+| verification 状态 | ⚠ pending |
 
 结论：**来源真实且对口，可支撑本策略**。
 
@@ -17,7 +17,7 @@
 
 - 共 9 块（定义 1、步骤 4、适合 2、不适合 2），与档案一致
 - 结构：✅ 无重复、无截断、自包含
-- 深度：⚠️ 步骤笼统，语料填厚阶段处理
+- 深度：⚠ 步骤笼统，语料填厚阶段处理
 
 ## 3. 人群标签初稿
 

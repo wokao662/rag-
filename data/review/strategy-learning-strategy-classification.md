@@ -9,7 +9,7 @@
 | sourceIds → 文件存在 | ✅ source-003 存在 |
 | 来源身份 | 《中学生学习策略结构研究》（2006，心理科学期刊），并有同编号 PDF（data/documents/source-003.pdf） |
 | 内容支撑性 | ✅ 来源确实是学习策略三维度（认知/元认知/资源管理）的结构研究，与策略 summary 一致 |
-| verification 状态 | ⚠️ pending |
+| verification 状态 | ⚠ pending |
 
 结论：**来源真实且对口**——同样是对口"背景知识"而非"可执行方法"（见第 4 节）。
 
@@ -48,5 +48,4 @@
 
 - 背景知识定性待拍板 → 见问题表 Q-NOSTEP
 - suitable_condition chunk 语义错位 → 见问题表 Q-CHUNK
-- 文件名与 strategyId 不一致（文件叫 source-003.json）→ 见问题表 Q-FILENAME
 - 来源 verification 待办 → 见问题表 Q-SRC

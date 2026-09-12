@@ -9,7 +9,7 @@
 | sourceIds → 文件存在 | ✅ source-006 存在 |
 | 来源身份 | Dunlosky, Rawson, Marsh, Nathan & Willingham (2013), *Psychological Science in the Public Interest*，DOI 可解析 |
 | 内容支撑性 | ✅ 该综述系统评估了 10 项学习技术，间隔/分散练习（distributed practice）被评为高实用性，与策略定义、步骤、适用人群一致 |
-| verification 状态 | ⚠️ pending（与 4/5 来源一样，待审核流程核验证） |
+| verification 状态 | ⚠ pending（与 4/5 来源一样，待审核流程核验证） |
 
 结论：**来源真实且对口，可支撑本策略**。
 

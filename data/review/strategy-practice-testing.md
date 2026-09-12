@@ -9,7 +9,7 @@
 | sourceIds → 文件存在 | ✅ source-006 存在 |
 | 来源身份 | Dunlosky, Rawson, Marsh, Nathan & Willingham (2013), *Psychological Science in the Public Interest*，DOI 可解析 |
 | 内容支撑性 | ✅ 该综述将「练习测试」（practice testing）评为**高实用性（high utility）**，是全文最强结论之一，与本策略 0.9/0.8 的高分定位一致 |
-| verification 状态 | ⚠️ pending |
+| verification 状态 | ⚠ pending |
 
 结论：**来源真实且对口，可支撑本策略**。库内王牌策略之一。
 
@@ -17,7 +17,7 @@
 
 - 共 9 块（定义 1、步骤 5、适合 2、不适合 1），与档案一致
 - 结构：✅ 无重复、无截断、自包含
-- 深度：⚠️ 步骤笼统（"合上资料尝试回忆"级别，缺"用什么形式自测、错题怎么处理"），语料填厚阶段处理
+- 深度：⚠ 步骤笼统（"合上资料尝试回忆"级别，缺"用什么形式自测、错题怎么处理"），语料填厚阶段处理
 
 ## 3. 人群标签初稿
 
