@@ -6,7 +6,7 @@
 |---|---|---|---|---|
 | Q-SCORE | 🔴 高 | `evidenceScore` / `effectivenessScore` 为 null，导入按 0 处理导致合成分垫底 | strategy-spaced-learning | 预填表已给建议值（0.9 / 0.8）与依据；**走审核决定接口落库**（分数与"谁定的、何时定的"绑定），任务 ② 文献清单落地后复核 |
 | Q-NOSTEP | 🔴 高 | 两条策略 `steps` 为空（stepCount=0），推中时产生空 `methodSteps` | strategy-learning-motivation-types、strategy-learning-strategy-classification | 预填表参谋意见均为**选项①（背景知识，移出推荐库）**，等你拍板后由维护者定性 |
-| Q-SRC-002 | 🟡 中 | source-002 是孤儿来源：没有任何策略引用它，且其 URL 是间隔练习教学资源，本可支撑 spaced-learning / distributed-practice | source-002 | 维护者要求二选一定性：**漏引 vs 该废弃**。建议：先核实 URL 有效性——内容真实则属漏引（补 verification 后关联），链接失效则废弃 |
+| Q-SRC-002 | 🟡 中 | source-002 是孤儿来源：没有任何策略引用它，且其 URL 是间隔练习教学资源，本可支撑 spaced-learning / distributed-practice | source-002 | **已核实（2026-09-12 curl 实测 HTTP 200），定性为漏引**：建议补元数据（真标题/作者/类型改 webpage）+ 关联到 distributed-practice 或 spaced-learning 的 sourceIds。仅 markdown 建议，source-002.json 未动 |
 | Q-SRC | 🟡 中 | 4/5 个来源 verificationStatus = pending，来源真实性未走完审核流程 | source-003 ~ source-006 | 随审核流程补 verification；#1 步核对的"编号存在+内容对口"只能证明自洽，不能替代来源核验 |
 | Q-DUP | 🟡 中 | spaced-learning 与 distributed-practice 是同一效应（间隔效应）的两条策略，内容、来源主题、适合人群大面积重叠 | 两条策略 | 建议维护者决定：合并为一条（保留 distributed-practice 的更具体步骤）或差异化定位（如 spaced 面向备考排期、distributed 面向知识保持） |
 | Q-CHUNK | 🟡 中 | 「中学生学习策略分析」被切成 suitable_condition chunk，但它是研究对象描述，不是"使用策略的条件"，语义错位 | strategy-learning-strategy-classification 的 chunk | 若 Q-NOSTEP 定性为背景知识则随整组处置；若保留则需重切 chunk（不在本任务范围） |
