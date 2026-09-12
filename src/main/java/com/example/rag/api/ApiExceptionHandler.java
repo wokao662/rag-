@@ -12,6 +12,7 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -24,6 +25,17 @@ public class ApiExceptionHandler {
             MethodArgumentNotValidException.class})
     ResponseEntity<ProblemDetail> badRequest(Exception error, HttpServletRequest request) {
         return problem(HttpStatus.BAD_REQUEST, "请求参数不合法", safeMessage(error), request);
+    }
+
+    /**
+     * 请求体不是合法 JSON（比如少个引号）时 Spring 抛这个异常；没有 handler 会落回默认错误体，
+     * 而 server.error.include-message: never 让它连 message 字段都没有，前端拿不到能显示的话。
+     * detail 刻意用固定文案、不回显 error.getMessage()：那条消息里带请求体原文片段，
+     * 而原文可能是用户逐字说过的话（画像抽取的输入就是），是全系统最大的隐私暴露面之一。
+     */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    ResponseEntity<ProblemDetail> unreadableBody(HttpMessageNotReadableException error, HttpServletRequest request) {
+        return problem(HttpStatus.BAD_REQUEST, "请求体格式错误", "请求体不是合法的 JSON", request);
     }
 
     @ExceptionHandler(AccessCodeService.UnauthorizedException.class)
