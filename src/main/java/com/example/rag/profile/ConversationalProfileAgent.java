@@ -53,7 +53,7 @@ public final class ConversationalProfileAgent implements AutoCloseable {
     private final ProfileDecisionValidator validator = new ProfileDecisionValidator();
     private final OkHttpClient client = new OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(90, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
             .build();
 
     public ConversationalProfileAgent(String apiKey) {
