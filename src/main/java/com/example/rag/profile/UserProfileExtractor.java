@@ -63,7 +63,7 @@ public final class UserProfileExtractor implements AutoCloseable {
     private final String apiKey;
     private final OkHttpClient client = new OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(90, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
             .build();
 
     public UserProfileExtractor(String apiKey) {
