@@ -7,8 +7,11 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -47,6 +50,20 @@ class AuthControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.externalId").value("REVIEWER-01"))
                 .andExpect(jsonPath("$.role").value("reviewer"));
+    }
+
+    @Test
+    void malformedJsonReturnsProblemDetailWithoutEchoingTheRawBody() throws Exception {
+        // 畸形 JSON 必须走统一的 ProblemDetail，且响应里不能出现请求体原文：
+        // 原文可能是用户逐字说过的话（画像抽取的输入就是），回显等于隐私泄露。
+        mockMvc.perform(post("/api/v1/auth/redeem")
+                        .contentType("application/json")
+                        .content("{code:TEST-8F3K2}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("请求体格式错误"))
+                .andExpect(jsonPath("$.detail").value("请求体不是合法的 JSON"))
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(content().string(not(containsString("code:TEST-8F3K2"))));
     }
 
     @Test
