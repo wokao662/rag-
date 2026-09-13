@@ -46,8 +46,24 @@ public final class UserProfileExtractor implements AutoCloseable {
             7. 不推断性格、智力、疾病、家庭背景或其他敏感属性。
             8. 只输出合法JSON，不输出Markdown和分析过程。
 
+            你还要判断这条消息属于哪个「目标情境」。一个目标情境 = 用户当前正在攻克的一个
+            具体学习任务（例如“四级听力”“数学期末考”）。输入里的 existingEpisodes 是用户
+            已有的活跃情境清单，每项含 id、label、goal、content。episodeDecision 规则：
+            1. 消息明显在继续清单里的某个情境（同一学习目标或内容）时，action="continue"，
+               并给出该情境的 episodeId。
+            2. 这是清单里没有的、新的学习目标时，action="new"，并给出一个简短中文 label
+               （不超过12个字，概括这个情境，如“四级听力”），episodeId 留空字符串。
+            3. 拿不准时优先 continue 到最接近的活跃情境，不要轻易开新情境，避免情境碎片化。
+            4. 同一学科下的不同任务算不同情境（“英语期末完形”与“四级听力”是两个情境）。
+            5. existingEpisodes 为空时，一律 action="new" 并给出 label。
+
             输出结构：
             {
+              "episodeDecision": {
+                "action": "continue 或 new",
+                "episodeId": "continue 时填对应 id；new 时填空字符串",
+                "label": "new 时填简短情境名；continue 时填空字符串"
+              },
               "updates": {
                 "字段名": {
                   "value": "与字段类型一致的值",
@@ -57,7 +73,7 @@ public final class UserProfileExtractor implements AutoCloseable {
                 }
               }
             }
-            没有可提取信息时输出 {"updates":{}}。
+            没有可提取的画像字段时 updates 输出 {}，但 episodeDecision 仍必须给出。
             """;
 
     private final String apiKey;
@@ -87,7 +103,9 @@ public final class UserProfileExtractor implements AutoCloseable {
         body.add("response_format", responseFormat);
 
         JsonObject input = new JsonObject();
-        input.add("existingProfile", existingProfile == null ? new JsonObject() : existingProfile);
+        // 只给活跃情境摘要（id/label/goal/content），不给整份画像：既省 token，
+        // 又避免模型从旧画像反推新信息（抽取只应基于当前消息）。
+        input.add("existingEpisodes", EpisodeProfile.episodeSummaries(existingProfile));
         JsonArray history = new JsonArray();
         recentMessages.forEach(message -> {
             JsonObject item = new JsonObject();
@@ -100,7 +118,7 @@ public final class UserProfileExtractor implements AutoCloseable {
 
         JsonArray messages = new JsonArray();
         messages.add(message("system", SYSTEM_PROMPT));
-        messages.add(message("user", "请只从currentUserMessage抽取画像更新：\n" + GSON.toJson(input)));
+        messages.add(message("user", "请只从currentUserMessage抽取画像更新，并判断目标情境归属：\n" + GSON.toJson(input)));
         body.add("messages", messages);
 
         Request request = new Request.Builder()

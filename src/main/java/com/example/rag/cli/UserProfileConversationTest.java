@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import com.example.rag.AppConfig;
 import com.example.rag.profile.ConversationRepository;
 import com.example.rag.profile.ConversationalProfileAgent;
+import com.example.rag.profile.EpisodeProfile;
 import com.example.rag.profile.MessageRepository;
 import com.example.rag.profile.ProfileDecisionValidator;
 import com.example.rag.profile.ProfileReadinessPolicy;
@@ -77,8 +78,8 @@ public final class UserProfileConversationTest {
                 try (Connection connection = Database.getConnection()) {
                     connection.setAutoCommit(false);
                     userMessageId = messages.save(connection, conversationId, "user", input, new JsonObject());
-                    existingProfile = profiles.findByUserId(connection, userId)
-                            .map(UserProfileRepository.StoredProfile::profile).orElseGet(JsonObject::new);
+                    existingProfile = EpisodeProfile.normalize(profiles.findByUserId(connection, userId)
+                            .map(UserProfileRepository.StoredProfile::profile).orElseGet(JsonObject::new));
                     recent = messages.findRecent(connection, conversationId, 8);
                     connection.commit();
                 }
@@ -87,11 +88,16 @@ public final class UserProfileConversationTest {
                 // CLI 不记日志，所以用量在这里直接丢掉，只取 content。
                 JsonObject extraction = extractor.extract(existingProfile, recent, input).content();
                 UserProfileValidator.ValidationResult validation = validator.validate(extraction, input);
-                JsonObject merged = merger.merge(existingProfile, validation.acceptedUpdates(), userMessageId);
-                ProfileReadinessPolicy.Decision fallbackDecision = readiness.evaluate(merged);
+                JsonObject episodeDecision = extraction.has("episodeDecision")
+                        && extraction.get("episodeDecision").isJsonObject()
+                        ? extraction.getAsJsonObject("episodeDecision") : null;
+                JsonObject merged = merger.merge(
+                        existingProfile, validation.acceptedUpdates(), episodeDecision, userMessageId);
+                JsonObject activeView = EpisodeProfile.flattenedActiveView(merged);
+                ProfileReadinessPolicy.Decision fallbackDecision = readiness.evaluate(activeView);
                 ProfileDecisionValidator.Decision decision;
                 try {
-                    decision = profileAgent.decide(merged, recent).content();
+                    decision = profileAgent.decide(activeView, recent).content();
                 } catch (Exception agentError) {
                     System.err.println("画像 Agent 暂时不可用，已使用本地规则继续：" + agentError.getMessage());
                     decision = new ProfileDecisionValidator.Decision(
