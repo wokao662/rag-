@@ -11,7 +11,7 @@ import java.util.Set;
 /** 对对话画像 Agent 的决定做结构和安全边界校验。 */
 public final class ProfileDecisionValidator {
     private static final Set<String> ALLOWED_ACTIONS = Set.of("ask", "recommend");
-    private static final int MAX_QUESTION_LENGTH = 160;
+    private static final int MAX_QUESTION_LENGTH = 240;
 
     public record Decision(
             String action,
@@ -49,13 +49,13 @@ public final class ProfileDecisionValidator {
             throw new IllegalArgumentException("准备推荐时 nextQuestion 必须为空");
         }
         if (!ready && nextQuestion.isBlank()) {
-            throw new IllegalArgumentException("继续画像时必须提供一个追问");
+            throw new IllegalArgumentException("继续画像时必须提供一段回复");
         }
         if (nextQuestion.length() > MAX_QUESTION_LENGTH) {
-            throw new IllegalArgumentException("追问过长，请只询问一个重点");
+            throw new IllegalArgumentException("回复过长，请控制在两三句话内");
         }
         if (nextQuestion.contains("\n")) {
-            throw new IllegalArgumentException("追问必须是单个问题，不能换行列出问题清单");
+            throw new IllegalArgumentException("回复不能换行，请写成一段话");
         }
 
         return new Decision(action, ready, confidence, reason,
