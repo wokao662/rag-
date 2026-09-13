@@ -1,11 +1,15 @@
-const PROFILE_LABELS = {
+// 画像分两层展示：情境层（随当前学习目标变化）与共享层（跨目标通用的你）。
+const EPISODE_LABELS = {
     learningGoal: "学习目标",
     learningContent: "学习内容",
     mainDifficulty: "主要困难",
-    availableMinutesPerDay: "每天可用时间",
     daysUntilDeadline: "距截止日期",
-    preferredLearningStyle: "偏好方式",
     triedMethods: "试过的方法"
+};
+
+const SHARED_LABELS = {
+    preferredLearningStyle: "偏好方式",
+    availableMinutesPerDay: "每天可用时间"
 };
 
 const PROFILE_UNITS = {
@@ -359,39 +363,94 @@ async function loadProfile() {
 
 function renderProfile(profile) {
     elements.profile.innerHTML = "";
-    const fields = Object.keys(PROFILE_LABELS).filter(field => profile[field]);
-    if (fields.length === 0) {
+    const episodes = Array.isArray(profile.episodes) ? profile.episodes : [];
+    const active = episodes.find(item => item.id === profile.activeEpisodeId) || episodes[0] || null;
+    const shared = profile.shared || {};
+
+    // 第一段：当前目标情境。
+    const currentSection = document.createElement("div");
+    currentSection.className = "profile-section";
+    const currentTitle = document.createElement("div");
+    currentTitle.className = "profile-section-title";
+    currentTitle.textContent = active ? "当前目标：" + (active.label || "当前学习") : "当前目标";
+    currentSection.appendChild(currentTitle);
+    const currentFields = renderProfileFields(active || {}, EPISODE_LABELS);
+    if (currentFields.length === 0) {
         const empty = document.createElement("p");
         empty.className = "profile-empty";
         empty.textContent = "聊几句之后，我会把了解到的学习情况整理在这里。";
-        elements.profile.appendChild(empty);
-        return;
+        currentSection.appendChild(empty);
+    } else {
+        currentFields.forEach(node => currentSection.appendChild(node));
     }
-    fields.forEach(field => {
+    elements.profile.appendChild(currentSection);
+
+    // 第二段：其他进行中的目标（只读展示，v1 不做手动切换）。
+    const others = episodes.filter(item => item.status !== "archived" && active && item.id !== active.id);
+    if (others.length > 0) {
+        const otherSection = document.createElement("div");
+        otherSection.className = "profile-section";
+        const otherTitle = document.createElement("div");
+        otherTitle.className = "profile-section-title";
+        otherTitle.textContent = "你还在进行的目标";
+        otherSection.appendChild(otherTitle);
+        const chips = document.createElement("div");
+        chips.className = "episode-chips";
+        others.forEach(item => {
+            const chip = document.createElement("span");
+            chip.className = "episode-chip";
+            chip.textContent = item.label || "未命名目标";
+            chips.appendChild(chip);
+        });
+        otherSection.appendChild(chips);
+        elements.profile.appendChild(otherSection);
+    }
+
+    // 第三段：跨目标通用的你。
+    const sharedFields = renderProfileFields(shared, SHARED_LABELS);
+    if (sharedFields.length > 0) {
+        const sharedSection = document.createElement("div");
+        sharedSection.className = "profile-section";
+        const sharedTitle = document.createElement("div");
+        sharedTitle.className = "profile-section-title";
+        sharedTitle.textContent = "关于你（跨目标通用）";
+        sharedSection.appendChild(sharedTitle);
+        sharedFields.forEach(node => sharedSection.appendChild(node));
+        elements.profile.appendChild(sharedSection);
+    }
+}
+
+/** 按给定的标签表渲染一组画像字段；返回 DOM 节点数组，空字段自动跳过。 */
+function renderProfileFields(source, labels) {
+    const nodes = [];
+    Object.keys(labels).forEach(field => {
+        const entry = source[field];
+        if (!entry || entry.value === undefined || entry.value === null) return;
         const item = document.createElement("div");
         item.className = "profile-item";
 
         const label = document.createElement("div");
         label.className = "label";
-        label.textContent = PROFILE_LABELS[field];
+        label.textContent = labels[field];
         item.appendChild(label);
 
         const value = document.createElement("div");
         value.className = "value";
-        const raw = profile[field].value;
+        const raw = entry.value;
         const unit = PROFILE_UNITS[field] || "";
         value.textContent = (Array.isArray(raw) ? raw.join("、") : String(raw)) + unit;
         item.appendChild(value);
 
-        if (profile[field].evidence) {
+        if (entry.evidence) {
             const quote = document.createElement("div");
             quote.className = "quote";
-            quote.textContent = "你说过：“" + profile[field].evidence + "”";
+            quote.textContent = "你说过：\u201c" + entry.evidence + "\u201d";
             item.appendChild(quote);
         }
 
-        elements.profile.appendChild(item);
+        nodes.push(item);
     });
+    return nodes;
 }
 
 /* ---------- 推荐历史与尝试后反馈 ---------- */

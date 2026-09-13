@@ -80,6 +80,20 @@ public final class ConversationRepository {
         return conversations;
     }
 
+    /**
+     * 记录会话当前归属的目标情境 id（见 V11 迁移的 conversations.episode_id）。
+     * v1 只写不读：实时行为由 profile.activeEpisodeId 驱动，这一列用于将来按情境聚合会话历史。
+     * 写入失败不阻断对话，因此调用方应吞掉异常。
+     */
+    public void updateEpisode(Connection connection, UUID conversationId, String episodeId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "UPDATE conversations SET episode_id = ? WHERE id = ?")) {
+            statement.setString(1, episodeId);
+            statement.setObject(2, conversationId);
+            statement.executeUpdate();
+        }
+    }
+
     public boolean belongsToUser(Connection connection, UUID conversationId, UUID userId) throws SQLException {
         String sql = "SELECT EXISTS (SELECT 1 FROM conversations WHERE id = ? AND user_id = ?)";
         try (PreparedStatement statement = connection.prepareStatement(sql)) {

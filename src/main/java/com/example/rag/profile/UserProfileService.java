@@ -90,8 +90,8 @@ public class UserProfileService {
             requireConversationOwnership(connection, conversationId, userId);
             UUID messageId = messages.save(connection, conversationId, "user", content, new JsonObject());
             Optional<UserProfileRepository.StoredProfile> stored = profiles.findByUserId(connection, userId);
-            JsonObject profile = stored.map(UserProfileRepository.StoredProfile::profile)
-                    .orElseGet(JsonObject::new);
+            JsonObject profile = EpisodeProfile.normalize(
+                    stored.map(UserProfileRepository.StoredProfile::profile).orElseGet(JsonObject::new));
             int version = stored.map(UserProfileRepository.StoredProfile::version).orElse(0);
             List<MessageRepository.StoredMessage> recent =
                     messages.findRecent(connection, conversationId, RECENT_MESSAGE_LIMIT);
@@ -117,15 +117,21 @@ public class UserProfileService {
         }
         UserProfileValidator.ValidationResult validation =
                 validator.validate(extractionReply.content(), content.trim());
-        JsonObject merged = merger.merge(context.profile(), validation.acceptedUpdates(), context.messageId());
-        ProfileReadinessPolicy.Decision fallback = readinessPolicy.evaluate(merged);
+        JsonObject episodeDecision = extractionReply.content().has("episodeDecision")
+                && extractionReply.content().get("episodeDecision").isJsonObject()
+                ? extractionReply.content().getAsJsonObject("episodeDecision") : null;
+        JsonObject merged = merger.merge(
+                context.profile(), validation.acceptedUpdates(), episodeDecision, context.messageId());
+        // 下游 readiness / decider / recommend 继续吃扁平视图（共享层 + 当前情境），无需感知情境结构。
+        JsonObject activeView = EpisodeProfile.flattenedActiveView(merged);
+        ProfileReadinessPolicy.Decision fallback = readinessPolicy.evaluate(activeView);
         ProfileDecisionValidator.Decision decision = decideWithFallback(
-                merged, context.recentMessages(), fallback, context.userId(), conversationId);
+                activeView, context.recentMessages(), fallback, context.userId(), conversationId);
 
         RecommendationService.RecommendationResult recommendation = null;
         if (decision.ready()) {
             try {
-                recommendation = recommendationService.recommend(merged, context.userId(), conversationId);
+                recommendation = recommendationService.recommend(activeView, context.userId(), conversationId);
             } catch (RecommendationService.RecommendationUnavailableException ignored) {
                 // 推荐失败不阻断画像流程，前端可稍后通过推荐接口重试。
             }
@@ -137,6 +143,7 @@ public class UserProfileService {
             boolean saved = profiles.saveIfVersion(
                     connection, context.userId(), merged, fallback.completeness(), context.profileVersion());
             if (!saved) throw new ProfileConflictException("画像已被另一条请求更新，请重试当前消息");
+            conversations.updateEpisode(connection, conversationId, EpisodeProfile.activeEpisodeId(merged));
             if (!decision.ready()) {
                 JsonObject metadata = new JsonObject();
                 metadata.addProperty("messageType", "profile_question");
@@ -172,7 +179,7 @@ public class UserProfileService {
             UUID userId = requireUser(connection, normalizedId);
             return profiles.findByUserId(connection, userId)
                     .map(profile -> new ProfileResult(
-                            profile.userId(), toMap(profile.profile()), profile.version(),
+                            profile.userId(), toMap(EpisodeProfile.normalize(profile.profile())), profile.version(),
                             profile.completeness(), profile.updatedAt().toString()))
                     .orElseThrow(() -> new ProfileNotFoundException("该用户还没有画像"));
         });
@@ -216,7 +223,7 @@ public class UserProfileService {
                     .map(UserProfileRepository.StoredProfile::profile)
                     .orElseThrow(() -> new ProfileNotFoundException("该用户还没有画像"));
         });
-        return recommendationService.recommend(profile, userHolder[0], null);
+        return recommendationService.recommend(EpisodeProfile.flattenedActiveView(profile), userHolder[0], null);
     }
 
     private static final int CONVERSATION_TITLE_LENGTH = 30;

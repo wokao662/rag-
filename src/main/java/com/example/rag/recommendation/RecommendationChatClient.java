@@ -1,5 +1,6 @@
 package com.example.rag.recommendation;
 
+import com.example.rag.llm.ModelJson;
 import com.example.rag.observability.ModelReply;
 import com.example.rag.observability.TokenUsage;
 import com.google.gson.Gson;
@@ -90,10 +91,10 @@ public final class RecommendationChatClient implements AutoCloseable {
         body.addProperty("temperature", 0.1);
         body.addProperty("max_tokens", 1200);
         body.addProperty("stream", false);
+        // 关思维链 + 不用 response_format:json_object：实测该结构化模式在 SiliconFlow 上会额外
+        // 叠加 17~24 秒固定惩罚，叠在本路 ~893 token 的生成时间上极易击穿 60 秒读超时；
+        // 去掉后靠 system prompt 约束 + ModelJson 兜底解析。
         body.addProperty("enable_thinking", false);
-        JsonObject responseFormat = new JsonObject();
-        responseFormat.addProperty("type", "json_object");
-        body.add("response_format", responseFormat);
 
         JsonArray messages = new JsonArray();
         messages.add(message("system", SYSTEM_PROMPT));
@@ -133,7 +134,7 @@ public final class RecommendationChatClient implements AutoCloseable {
                 TokenUsage usage = TokenUsage.fromApi(apiResponse);
                 String content = apiResponse.getAsJsonArray("choices").get(0).getAsJsonObject()
                         .getAsJsonObject("message").get("content").getAsString();
-                return new ModelReply<>(JsonParser.parseString(content).getAsJsonObject(), usage);
+                return new ModelReply<>(ModelJson.parseObject(content), usage);
             } catch (RuntimeException error) {
                 throw new IOException("推荐模型没有返回合法 JSON", error);
             }
