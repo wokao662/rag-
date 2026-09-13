@@ -1,5 +1,6 @@
 package com.example.rag.profile;
 
+import com.example.rag.llm.ModelJson;
 import com.example.rag.observability.ModelReply;
 import com.example.rag.observability.TokenUsage;
 import com.google.gson.Gson;
@@ -96,10 +97,9 @@ public final class ConversationalProfileAgent implements AutoCloseable {
         body.addProperty("temperature", 0.5);
         body.addProperty("max_tokens", 800);
         body.addProperty("stream", false);
+        // 关思维链 + 不用 response_format:json_object：实测该结构化模式在 SiliconFlow 上
+        // 会劣化到 17~40 秒击穿 30 秒读超时，去掉后靠 system prompt 约束 + ModelJson 兜底解析。
         body.addProperty("enable_thinking", false);
-        JsonObject responseFormat = new JsonObject();
-        responseFormat.addProperty("type", "json_object");
-        body.add("response_format", responseFormat);
         JsonArray messages = new JsonArray();
         messages.add(message("system", SYSTEM_PROMPT));
         messages.add(message("user", "请根据以下画像和最近对话决定下一步：\n" + GSON.toJson(context)));
@@ -123,7 +123,7 @@ public final class ConversationalProfileAgent implements AutoCloseable {
                 String content = apiResponse.getAsJsonArray("choices").get(0).getAsJsonObject()
                         .getAsJsonObject("message").get("content").getAsString();
                 return new ModelReply<>(
-                        validator.validate(JsonParser.parseString(content).getAsJsonObject()), usage);
+                        validator.validate(ModelJson.parseObject(content)), usage);
             } catch (RuntimeException error) {
                 throw new IOException("画像 Agent 返回内容未通过格式校验", error);
             }

@@ -1,5 +1,6 @@
 package com.example.rag.profile;
 
+import com.example.rag.llm.ModelJson;
 import com.example.rag.observability.ModelReply;
 import com.example.rag.observability.TokenUsage;
 import com.google.gson.Gson;
@@ -97,10 +98,10 @@ public final class UserProfileExtractor implements AutoCloseable {
         body.addProperty("temperature", 0);
         body.addProperty("max_tokens", 1000);
         body.addProperty("stream", false);
+        // 关思维链 + 不用 response_format:json_object：实测该结构化模式在 SiliconFlow 上
+        // 会劣化到 17~40 秒击穿 30 秒读超时，去掉后靠 system prompt 约束 + ModelJson 兜底解析，
+        // 同样的输出降到 1 秒级。详见 ModelJson 类注释。
         body.addProperty("enable_thinking", false);
-        JsonObject responseFormat = new JsonObject();
-        responseFormat.addProperty("type", "json_object");
-        body.add("response_format", responseFormat);
 
         JsonObject input = new JsonObject();
         // 只给活跃情境摘要（id/label/goal/content），不给整份画像：既省 token，
@@ -137,7 +138,7 @@ public final class UserProfileExtractor implements AutoCloseable {
             String content = apiResponse.getAsJsonArray("choices").get(0).getAsJsonObject()
                     .getAsJsonObject("message").get("content").getAsString();
             try {
-                JsonObject extraction = JsonParser.parseString(content).getAsJsonObject();
+                JsonObject extraction = ModelJson.parseObject(content);
                 if (!extraction.has("updates") || !extraction.get("updates").isJsonObject()) {
                     throw new IllegalArgumentException("缺少updates对象");
                 }
