@@ -84,6 +84,8 @@
 
 **验收方式**：维护者对照问题表逐条确认，并决定哪些预填可以转正。
 
+**完成记录**：2026-09-12，分支 task/03-review-prefill，PR #25。13 份预填表 + 问题表（10 项，Q-SCORE/Q-NOSTEP 为高）全部交付；#11/#12 参谋意见为选项①（背景知识，移出推荐库）、#13 建议分 0.9/0.8（待任务 ② 文献清单复核），四项拍板由维护者合并后走审核端点落库。review 一轮：撤销误报的 Q-FILENAME、清理 25 个 U+FE0F 隐藏字符。红线全守（策略 JSON / chunk 生成 / Qdrant / 审核端点零接触）。
+
 ## 任务 ④ 默认包旧命令行类清理
 
 **目标**：处理 `src/main/java/` 根目录（默认包）下的 5 个旧类：`Database`、`DocumentExtractor`、`DatabaseConnectionTest`、`LLMTest`、`UserProfileConversationTest`。
