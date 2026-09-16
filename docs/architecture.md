@@ -134,7 +134,7 @@ Embedding 模型只负责把文本转换为向量。未来的用户画像模型�
 
 两个尚未生效的部分必须说清楚：
 
-1. `app.governance.review-gate` 默认 `false`，因此“未审核”与“曝光人数上限”两条规则目前**不拦截**。现存 13 个策略档案全是 `draft`，直接开启会把推荐过滤成全空。与审核无关的三条（无源档案、已被真实反馈证伪、人工暂停）永远生效。
+1. `app.governance.review-gate` 默认 `false`，因此“未审核”与“曝光人数上限”两条规则目前**不拦截**。首批人工审核已完成后（11 条 `approved` + 2 条 `rejected`+`paused`，0 条 `draft`），直接开启不再会把推荐过滤成全空；本地仍保持 `false` 是有意的——那 2 条背景知识由 `paused` 与此开关无关地永久挡下，开不开结果相同，上线公网时才置 `true`。与审核无关的三条（无源档案、已被真实反馈证伪、人工暂停）永远生效。
 2. 档位状态机 `seed`(20 人) → `scaling`(`exposure_cap`) → `full` 的代码已写，但从未被真实触发过：没有任何策略累计到 20 个曝光用户，且升档判定还依赖闸门开启后的人数上限。
 
 闸门查询失败时 fail-closed（挡下全部候选，宁可这次不推荐也不能把未审核内容当作已审核推给用户）；曝光记录失败时 fail-open（推荐已经生成，不能因为记账写不进去就丢掉它）。两条路径都打完整异常栈，因为外层包装的 message 只有一句“数据库操作失败”，真正的 SQL 错误在 `cause` 里——这个坑真实踩过一次：一个只在带范围查询时才出现的 SQL 语法错误被 best-effort 的 catch 吃掉，表现只是“曝光表一直是空的”。
@@ -168,9 +168,9 @@ Embedding 模型只负责把文本转换为向量。未来的用户画像模型�
 - `modelVersion`：生成预测的模型版本。
 - 结构化策略字段：`name`、`summary`、`steps`、`suitableFor`、`notSuitableFor`，供 Java 切块使用。
 
-`reviewStatus` 的取值已统一。历史上 `data/strategies/*.json` 全部 13 个文件用 `draft`，而本节曾定义 `pending`/`approved`/`rejected`，两套取值零交集——按文档写筛选条件会一条都查不出来。V6 迁移的 `strategies_review_status_check` 取两者并集并补上 `archived`，共五个值：`draft` / `pending` / `approved` / `rejected` / `archived`。导入时种子策略保持档案里的 `draft`，**不自行提升为 `approved`**：那是伪造审核决定，而审核者身份本身还是待定参数。
+`reviewStatus` 的取值已统一。历史上 `data/strategies/*.json` 全部 13 个文件用 `draft`，而本节曾定义 `pending`/`approved`/`rejected`，两套取值零交集——按文档写筛选条件会一条都查不出来。V6 迁移的 `strategies_review_status_check` 取两者并集并补上 `archived`，共五个值：`draft` / `pending` / `approved` / `rejected` / `archived`。导入器只在 `review_status='draft'` 时覆盖评分，**从不自行把策略提升为 `approved`**（那是伪造审核决定）；`approved`/`rejected` 只能由审核端点写入。首批审核已完成（2026-09-12，审核人 wokao）：11 条 `approved`、2 条背景知识 `rejected`+`paused`、0 条 `draft`。Path 2 重导入 131 个 chunk 时这条守卫拦住了“把已审核策略打回 draft”，重导入后 review_status 分布不变。
 
-**chunk 由 Java 生成，不由模型生成。** `chunkId` 依赖 `uuid5(固定命名空间, "{strategyId}:{chunkType}:{index}")` 确定性推导，这是重复入库不产生 Qdrant 孤儿点的前提。模型直接生成 chunk 会破坏幂等性，并使 chunk 文体与既有语料不一致而损害检索质量，还会让 `RecommendationValidator` 的 `citations` 校验失去稳定锚点。模型只负责输出结构化字段，切块套用现有四类模板：`definition`、`procedure`、`suitable_condition`、`unsuitable_condition`。
+**chunk 由确定性脚本生成，不由模型生成**（当前实现是 `generate_strategy_chunks.py`；将来接入适合人群预测模型后，改由 Java 按同样的固定模板切块）。`chunkId` 依赖 `uuid5(固定命名空间, "{strategyId}:{chunkType}:{index}")` 确定性推导，这是重复入库不产生 Qdrant 孤儿点的前提。模型直接生成 chunk 会破坏幂等性，并使 chunk 文体与既有语料不一致而损害检索质量，还会让 `RecommendationValidator` 的 `citations` 校验失去稳定锚点。模型只负责输出结构化字段，切块套用现有**五类**模板：`definition`、`procedure`、`suitable_condition`、`unsuitable_condition`、`evidence`。第五类 `evidence` 由 Path 2 引入（V12 放开 `strategy_chunks_type_check`）：把档案里的 `evidence[]`（研究结论 + DOI）生成 `{name}的研究证据：{claim}（出处：{citation} {url}）` 形式的 chunk，metadata 里带独立的 `evidenceUrl` 字段，使推荐能连带展示可点开的研究出处。
 
 它与其他模型的职责不同：
 
@@ -254,7 +254,7 @@ Embedding 模型只负责把文本转换为向量。未来的用户画像模型�
 
 **审核端点不参与开发模式放行**：`access_codes` 表为空时过滤器放行一切请求（方便本地开发），但 `requireReviewer` 查不到码照样抛 401。资格校验是失败关闭的。
 
-**队列里带 `stepCount`/`chunkCount` 的用意**：审核者要判的第一件事是这份档案完不完整。`steps` 是空数组的策略（现有 2 个）推中时会产生空的 `methodSteps`，`chunkCount` 为 1 的策略（现有 1 个）内容深度不足。这两个数字让审核者不打开 JSON 就能看见问题。`stepCount` 用 `jsonb_typeof` 守卫，否则一份 `steps` 写坏的档案会让整个列表 500。
+**队列里带 `stepCount`/`chunkCount` 的用意**：审核者要判的第一件事是这份档案完不完整。`steps` 是空数组的策略推中时会产生空的 `methodSteps`，`chunkCount` 极小的策略内容深度不足——首批审核正是靠这两个数字认出那 2 条背景分类知识（`steps` 为空、`chunkCount` 1-2）并 `rejected`+`paused`。这两个数字让审核者不打开 JSON 就能看见问题。`stepCount` 用 `jsonb_typeof` 守卫，否则一份 `steps` 写坏的档案会让整个列表 500。
 
 三条业务规则：
 

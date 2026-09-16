@@ -27,12 +27,14 @@
 - 记录模型调用日志：`model_call_logs` 表，含任务类型、输入输出、耗时、状态与错误信息。
 - 访问码机制：`access_codes` 表为空时不拦截（本地开发），发放访问码后一码一用户空间。
 - 尝试后反馈通道：`method_trial_feedback` 表与推荐历史接口，`tried` 与 `outcome` 在数据库和 Java 层有同样的自洽约束，只能对被推荐过的方法反馈。
-- 策略存储层：V6 迁移建立 `strategies`、`sources`、`strategy_chunks`、`strategy_exposures` 四张表，并把现有 5 个来源、13 个策略、107 个 chunk 导入。导入器幂等可重跑，且只在 `draft` 状态下覆盖评分。
+- 策略存储层：V6 迁移建立 `strategies`、`sources`、`strategy_chunks`、`strategy_exposures` 四张表，导入器把 5 个来源、13 个策略与其 chunk 写进 PostgreSQL。导入器幂等可重跑，且只在 `draft` 状态下覆盖评分——Path 2 重导入时库内已是 131 个 chunk（含 24 条 `evidence`），而 11 条已 `approved` 的策略没有被打回 `draft`，守卫生效。
 - 推荐闸门与渐进投放执行层：`StrategyGovernanceService` 在召回后、补齐 chunk 前过滤，曝光按 `(策略, 用户)` 去重计数，档位 `seed`/`scaling`/`full`/`paused`。
 - 反馈驱动的升降权：尝试后反馈同事务内触发重算，社区分取有用率的 Wilson 95% 置信下界，最小门槛 10 条，合成总分 0.3/0.5/0.2，低分标记待归档（只标记不删除）。
 - 派生值可重建：启动时从反馈表与曝光表整体重算一次，已验证清空源数据后重启能完全回到正确基线。
 - 行为观测采集：`behavior_observations` 表，确定性代码算出 12 行指标，事务提交后重算，**只存不喂模型**。
 - 模型调用日志写入前脱敏（证件号、卡号、手机号、邮箱、长数字串）并按保留期自动清理；学习相关的短数字不受影响，`messages.content` 保留原文。
+- 首批人工审核完成（2026-09-12，审核人 wokao）：13 条策略逐条终审判定，11 条 `approved`（`reviewer_score` 齐全，作为适合人群预测模型的第一批训练标签），2 条背景分类知识 `rejected` 且 `exposure_state=paused`（`steps` 为空、非可执行方法）。开 `review-gate` 的前置已满足。
+- 知识库内容填厚（Path 2，迁移 V11/V12）：11 条真方法从单句定义扩写成含实施步骤、近邻差异化定位与可点开 DOI 的研究证据；新增第五类 chunk `evidence`（V12 放开 `strategy_chunks_type_check`），把原本躺在档案里的 `evidence[]` 死字段变成可检索、带出处的 chunk。chunk 从 107 增至 131（其中 `evidence` 24 条），正文从约 4356 字符增至 10970 字符。
 
 ## 当前方案的临时性质
 
@@ -40,11 +42,11 @@
 - 当前模型使用 `Qwen/Qwen3-32B`；它只是开发期实现，不代表最终自研模型选型。
 - 当前画像字段较少，主要覆盖目标、内容、困难、时间、截止期限、偏好和尝试过的方法。
 - 当前完整度是简单字段计数，只用于观察，不应直接等同于画像质量。
-- Agent 返回 `recommend` 后已接入 Qdrant 推荐链路，召回后有一道治理闸门。但 `app.governance.review-gate` 默认关闭，所以“未审核”与“曝光人数上限”两条目前不拦截：现存 13 个策略档案全是 `draft`，开启会把推荐过滤成全空。与审核无关的三条（无源档案、已被真实反馈证伪、人工暂停）永远生效。开启它的前置条件是人工审核完成并把通过的策略置为 `approved`。
+- Agent 返回 `recommend` 后已接入 Qdrant 推荐链路，召回后有一道治理闸门。`app.governance.review-gate` 默认关闭，所以“未审核”与“曝光人数上限”两条目前不拦截。首批人工审核已完成后，这个默认值从“不得已”变成了“本地开发有意”：11 条已 `approved`、2 条背景知识已 `rejected`+`paused`，开启闸门不再会把推荐过滤成全空，且 `paused` 与 gate 无关地永久挡下那 2 条，所以本地开不开结果相同。与审核无关的三条（无源档案、已被真实反馈证伪、人工暂停）永远生效。上线公网时再置 `GOVERNANCE_REVIEW_GATE=true`，让“只推 approved + 曝光人数上限”两条生效。
 - 合成分 `overall_score` 已算出并落库，但**未参与排序**，召回仍只按向量相似度取前 5。档位状态机的代码已写但从未被真实触发（没有任何策略累计到 20 个曝光用户）。
 - 当前命令行程序用于验证流程，不是最终产品界面。
-- 知识库内容极薄：13 个策略共 107 个 chunk，正文总计约 4356 字符，平均每 chunk 41 字符，多为单句定义，缺少实施细节与证据。策略骨架本身是正确的（10/13 精确对应 Dunlosky 等人 2013 年评估的十项技术，chunkType 分为 definition/procedure/suitable_condition/unsuitable_condition），缺的只是内容深度。
-- 三个已发现但未擅自修改的内容质量问题（属于人工审核的范围）：`strategy-learning-motivation-types`（1 个 chunk）与 `strategy-learning-strategy-classification`（2 个 chunk）的 `steps` 是空数组，它们是背景分类知识而不是可执行方法，推中时会产生空的 `methodSteps`；`strategy-spaced-learning`（间隔学习，12 chunk，6 步）与 `strategy-distributed-practice`（间隔练习，11 chunk，6 步）是间隔效应的近重复，可能同时推给同一用户，且前者档案缺 `evidenceScore`/`effectivenessScore`，按 0 导入后合成分垫底；`data/sources/source-002.json` 的 authors 与 publisher 同为一人，导致 attribution 拼成重复串。
+- 知识库内容已从“极薄”填厚到中等深度（Path 2）：13 个策略共 131 个 chunk，正文总计 10970 字符，平均每 chunk 83.7 字符（中位 70、最长 184、最短 38）。11 条真方法的 `procedure` 步骤已含动作/参数/例子三要素，并新增 24 条 `evidence` chunk 承载可点开 DOI 的研究出处；chunkType 从四类扩为五类（definition/procedure/suitable_condition/unsuitable_condition/**evidence**）。策略骨架本身正确（10/13 精确对应 Dunlosky 等人 2013 年评估的十项技术）。仍未做厚的是 2 条背景分类知识（已 `rejected`+`paused`，不进推荐），以及每条策略的证据数量还偏少（多为 2-3 条 DOI）。
+- 三个曾发现的内容质量问题，前两个已在首批审核 + Path 2 中处置，只剩第三个待办：① `strategy-learning-motivation-types` 与 `strategy-learning-strategy-classification` 的 `steps` 是空数组（背景分类知识、非可执行方法）——已 `rejected` + `exposure_state=paused` 移出推荐库；② `strategy-spaced-learning`（间隔学习）与 `strategy-distributed-practice`（间隔练习）是间隔效应的近重复——Path 2 已差异化定位（distributed 重塑为“无截止日、长期保持习惯”，spaced 保留“有明确考试时间”），且 spaced 缺的 `evidenceScore`/`effectivenessScore` 已在审核决定里补为 0.9/0.8（`overall_score` 重算 0.43）；③ **仍未处理**：`data/sources/source-002.json` 的 `authors` 与 `publisher` 同为 “S. C. Pan for UCSD Psychology”，导致 attribution 拼成重复串，待核实后修正。
 - 推荐链路耗时已碰到超时线，而波动完全不在本项目控制范围内：`RecommendationChatClient` 的 `readTimeout` 是 90 秒，同一条链路 2026-09-10 用了 23.2 秒，2026-09-11 用了 83.9 秒——只剩 6 秒余量，而早期探针还出现过一次 90.5 秒真超时。V8 起 token 用量入库，这两天构成了一组同负载对照：
 
   | 日期 | prompt | completion | 耗时 | 生成速率 |
@@ -54,7 +56,7 @@
 
   输入差 0.5%、输出差 5.7%，耗时差 3.6 倍，**变量只剩服务端生成速率**。同批的 `extract`（207/19.9 秒）与 `decide`（101/10.2 秒）也都是约 10 token/秒，所以是服务端整体变慢而不是单次抖动。结合 09-10 同批三次调用速率一致（33-36 token/秒）、且 `decide` 输入比 `extract` 大 69% 却更快，可以定下：**耗时几乎全由输出长度决定，数千 token 的输入贡献不到一秒**。**所以“限制知识负载”治不了超时**，它治的是成本与截断；超时的真实选项只有压 `max_tokens`、调阈值、换更快的模型，三者都影响推荐质量，需要一起定。注意按实测下限算，`max_tokens=1400` ÷ 10 token/秒 = 140 秒，单靠调阈值补不回来。
 - 知识负载没有真正的预算：`findByStrategyIds` 的静默截断已修（分页取回 + 上限 200 + 截断量记入 `model_call_logs.knowledgeDropped`），但 200 这个数只是防提示词无边界的安全阀，不是按 token 算出来的预算。每个 chunk 已被截到 500 字符，200 个就是十万字符量级，真填到这个量级上下文窗口会先于预算报错。语料开始填厚前需要定下按 token 的知识负载预算。
-- 审核权限已有强制点：V9 给 `access_codes` 加了 `role` 列（`tester` / `reviewer`，默认 `tester`），`POST /api/v1/auth/redeem` 会把角色返回给前端用于决定是否展示审核入口；V10 起审核端点落地（`GET .../reviews/pending` 与 `POST .../reviews/{strategyId}/decision`），服务层 `requireReviewer` 校验角色，`strategies` 那四个自 V6 起无人写入的审核列已接上。剩下的卡点从“没有审核端点”移到了“没有真实审核动作”：13 个策略仍全是 `draft`，`review-gate` 仍不能开，`reviewer_score` 仍为 0 条。
+- 审核权限已有强制点：V9 给 `access_codes` 加了 `role` 列（`tester` / `reviewer`，默认 `tester`），`POST /api/v1/auth/redeem` 会把角色返回给前端用于决定是否展示审核入口；V10 起审核端点落地（`GET .../reviews/pending` 与 `POST .../reviews/{strategyId}/decision`），服务层 `requireReviewer` 校验角色，`strategies` 那四个自 V6 起无人写入的审核列已接上。卡点已从“没有审核端点”→“没有真实审核动作”→**审核动作已完成**：2026-09-12 审核人 wokao 逐条终审 13 条，11 条 `approved`（`reviewer_score` 齐全）、2 条 `rejected`+`paused`，`review-gate` 前置已满足。仍未做的是审核**界面**（端点可用，靠 curl 落决定）与投稿入口。
 - 投稿入口与审核通过后自动 Embedding 写入 Qdrant 的路径都未实现（审核队列的端点已有，但没有界面）。存储层已就绪，但只能靠导入器从本地 JSON 入库。
 - 归档只到“标记 + 闸门挡下”为止：没有人工确认入口，也不会从 Qdrant 移除向量。
 - 无限流机制，公网部署后存在被脚本刷 token 的风险。
@@ -98,11 +100,11 @@
 - 实现多轮聊天、会话历史和推荐结果展示。
 - 展示方法名称、具体步骤、推荐理由和来源。
 - 明确区分“用户确认”和“模型推测”。**原计划的“允许用户更正画像信息”已取消**：开放手动编辑等于完全采信用户自述，与“信用户的话只信一半”策略冲突；用户可查看画像并通过对话确认模型的推测（写入 `confirmed` 层级），但不能直接改写字段值。
-- 收集采纳、跳过、收藏、评分和执行结果等反馈。（当前仅实现采纳与跳过；执行结果反馈对验证方法是否真正有效是决定性的，尚未实现。）
+- 收集点赞与执行结果等反馈。（当前实现两条通道：卡片 👍 点赞写入 `recommendation_feedback`，只汇总给投稿者看、不参与推荐度；历史页尝试后反馈写入 `method_trial_feedback`，含“试没试 + 效果”，是升降权的**唯一依据**——这条“执行结果反馈”对验证方法是否真正有效是决定性的，已落地。早期的采纳/跳过 `adopted`/`dismissed` 已退役；收藏与用户评分尚未实现。）
 
 建议分支：`feature/web-chat-ui`
 
-### 阶段 6：知识库存储层与用户投稿审核（存储层、投放执行层与审核端点已完成，投稿与审核界面未做）
+### 阶段 6：知识库存储层与用户投稿审核（存储层、投放执行层、审核端点与首批人工审核已完成，投稿与审核界面未做）
 
 这是“语料主体来自用户投稿”战略的地基，必须先于适合人群预测模型。没有存储层就无法建审核队列，也无法实现渐进投放。
 
@@ -121,10 +123,10 @@
 - 模型初判不在提交时同步执行，改为队列或审核者点开时触发，并加投稿频率限制。
 - 审核**界面**（端点已做，界面未做）：待审核列表、展示模型初判与推荐度、通过/驳回/修改。界面只需读 `redeem` 返回的 `role` 决定是否展示入口，数据全部可从 `GET .../reviews/pending` 取得（已含 `stepCount`/`chunkCount` 与四个分数）。
 - 审核通过后自动 Embedding 并写入 Qdrant；重复入库前先按 `strategyId` 清理旧向量，避免孤儿点。（导入器已对 `strategy_chunks` 做了先删后插，但 Qdrant 侧还是 `StrategyIndexer` 手动跑）
-- 把现有 13 个策略审核通过，作为第一批标注数据与种子语料。审核前建议先处理上面列出的三个内容质量问题；其中“缺 `evidenceScore`/`effectivenessScore`”一项现在可以直接在审核决定里补，不需要回头改档案 JSON 重跑导入。
+- ~~把现有 13 个策略审核通过，作为第一批标注数据与种子语料~~ **已完成**（2026-09-12）：11 条 `approved`（第一批 `reviewer_score` 训练标签）+ 2 条背景知识 `rejected`+`paused`；spaced-learning 缺的两个证据分已在审核决定里直接补（0.9/0.8），未回改档案 JSON。
 - 投稿者查看自己投稿状态与被采纳次数的接口。
 
-**前置约束**：本阶段包含数据库迁移，按项目 Flyway 约定（不开启 `out-of-order`）必须晚于所有更低版本号的迁移分支合并，且后续分支应从其后切出。目前已到 V10，下一个迁移从 V11 起。
+**前置约束**：本阶段包含数据库迁移，按项目 Flyway 约定（不开启 `out-of-order`）必须晚于所有更低版本号的迁移分支合并，且后续分支应从其后切出。目前已到 V12（V11、V12 为 Path 2 等后续分支），下一个迁移从 V13 起。
 
 **待定参数已大部分定下**（见 `architecture.md` 的《待定参数》）：曝光机制取人数上限、最小反馈门槛 10 条、归档必须人工确认、执行后反馈已实现为升降权唯一依据、审核者角色以 `access_codes.role` 表达、审核权限在服务层强制、`reviewed_by` 写 `label`。仍未定：投稿者查看接口给到什么数据粒度、是否需要随机曝光以避免选择偏差。
 
@@ -182,7 +184,7 @@
 
 按依赖顺序排列：
 
-1. 人工审核现有 13 个策略：先处理《当前方案的临时性质》里列出的三个内容质量问题，再把通过的置为 `approved`，最后打开 `GOVERNANCE_REVIEW_GATE=true`。**审核端点已就绪**，这一步现在只剩人工判断本身。在此之前闸门的两条审核相关规则只能空转。
+1. ~~人工审核现有 13 个策略~~ **已完成**（2026-09-12，11 approved + 2 rejected+paused）。剩下的只是**上线时**打开 `GOVERNANCE_REVIEW_GATE=true`（本地不必开，`paused` 已挡那 2 条）；以及处理《当前方案的临时性质》里仍未办的第三个内容质量问题（`source-002` attribution 重复串）。
 2. 让 `overall_score` 参与排序。它已算出并落库，但全仓没有任何读取方拿它排序，召回恒按向量相似度取前 5——这意味着“反馈驱动升降权”目前只有降权（证伪 -> `pending_archive` -> 停曝光）真正生效，升权完全空转。要做需要定下相似度与合成分的混合权重，而当前 `method_trial_feedback` 为 0 行，改完无法用真实数据验证。
 3. 定推荐链路的超时对策与知识负载预算。`findByStrategyIds` 的静默截断已修（分页取回 + 上限 200 + 截断量记入 `knowledgeDropped`），剩下两件都不是写代码就能了结的：超时侧要在压 `max_tokens`、调 `readTimeout`、换更快的模型之间选，三者都直接影响推荐质量，而 09-11 实测 83.9 秒距 90 秒阈值只剩 6 秒，按实测速率下限算 `max_tokens=1400` 需要 140 秒，单靠调阈值补不回来；知识负载侧要把 200 这个安全阀换成按 token 算的预算。这一项不再阻塞前两项，但语料开始填厚前必须定下来。
 4. 定下剩余的渐进投放参数：投稿者查看接口给到什么数据粒度（可见性**策略**已定案——卡片只有单向点赞、点赞只对投稿者可见、尝试后反馈走独立通道，2026-09-10 落地；未定的是接口暴露到哪一层）、是否需要随机曝光以避免选择偏差（当前曝光完全由检索相似度决定，被推中的策略天然更契合查询，反馈数据有偏）。
@@ -191,7 +193,7 @@
 7. 定义适合人群预测模型的标签体系和人工标注规范，暂不急于训练模型。
 8. 建立小型对话评测集，覆盖信息不足、一次说清、前后矛盾和拒绝回答等情况。
 
-已完成并从本列表移除：对话画像 Agent 的单元测试与手动中文对话测试；将 `ready=true` 接入 Qdrant 检索；Spring Boot API 与 Web 页面；渐进投放的主要待定参数（曝光机制取人数上限、最小反馈门槛 10 条、Wilson 下界、合成权重 0.3/0.5/0.2、归档只标记）；`sources`/`strategies`/`strategy_chunks` 存储层；`reviewStatus` 取值统一；检索侧的元数据过滤与闸门；审核者角色的表达（`access_codes.role` 列 + `redeem` 返回）；**审核端点与角色强制点**（V10，含待审队列、通过/驳回、`reviewer_score` 与两个证据分的补分入口，并把四个自 V6 起无人写入的审核列接上）；`findByStrategyIds` 的静默截断；observed 层级的采集。
+已完成并从本列表移除：对话画像 Agent 的单元测试与手动中文对话测试；将 `ready=true` 接入 Qdrant 检索；Spring Boot API 与 Web 页面；渐进投放的主要待定参数（曝光机制取人数上限、最小反馈门槛 10 条、Wilson 下界、合成权重 0.3/0.5/0.2、归档只标记）；`sources`/`strategies`/`strategy_chunks` 存储层；`reviewStatus` 取值统一；检索侧的元数据过滤与闸门；审核者角色的表达（`access_codes.role` 列 + `redeem` 返回）；**审核端点与角色强制点**（V10，含待审队列、通过/驳回、`reviewer_score` 与两个证据分的补分入口，并把四个自 V6 起无人写入的审核列接上）；`findByStrategyIds` 的静默截断；observed 层级的采集；**首批人工审核**（2026-09-12，13 条逐条终审：11 approved + 2 rejected+paused，`reviewer_score` 齐全）；**Path 2 内容填厚与 evidence chunk**（V11/V12，11 条真方法扩写、新增第五类 `evidence` chunk 承载可点开 DOI，chunk 107→131、正文 4356→10970 字符）。
 
 ## 暂不优先
 

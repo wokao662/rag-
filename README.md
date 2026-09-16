@@ -58,7 +58,7 @@ mvn compile exec:java "-Dexec.mainClass=com.example.rag.cli.DocumentExtractor" "
 
 ## 从策略档案生成最终 Chunk
 
-`generate_strategy_chunks.py` 读取 `data/strategies/*.json`，将策略的定义、每个实施步骤、每个适用条件和每个不适用条件分别生成可检索的 JSONL Chunk。
+`generate_strategy_chunks.py` 读取 `data/strategies/*.json`，将策略的定义、每个实施步骤、每个适用条件、每个不适用条件以及每条研究证据分别生成可检索的 JSONL Chunk（五类：`definition` / `procedure` / `suitable_condition` / `unsuitable_condition` / `evidence`；`evidence` 由 V12 迁移放开，带可点开的 DOI 出处）。
 
 ```powershell
 python .\generate_strategy_chunks.py
@@ -365,7 +365,7 @@ mvn compile exec:java "-Dexec.mainClass=com.example.rag.cli.StrategyImporter" "-
 | `review_status != 'approved'` | 不生效 | 生效 |
 | 曝光人数达到当前档位上限 | 不生效 | 生效 |
 
-默认关闭是因为现存 13 个策略档案全是 `draft`，直接开启会把推荐过滤成全空。但前三条拦截与审核无关，所以飞轮在人工审核完成之前就开始转：无溯源的和已被真实反馈证伪的照样挡下，曝光计数、社区分与合成总分照常累计。审核完成、把通过的策略置为 `approved` 之后改成 `true`。
+默认关闭在首批人工审核完成前是不得已（当时 13 个策略全是 `draft`，直接开启会把推荐过滤成全空）；审核完成后（2026-09-12，11 条 `approved` + 2 条背景知识 `rejected`+`paused`）本地仍保持 `false` 是有意的——那 2 条由 `paused` 与此开关无关地永久挡下，开不开结果相同。前三条拦截与审核无关，飞轮一直在转：无溯源的和已被真实反馈证伪的照样挡下，曝光计数、社区分与合成总分照常累计。上线公网时改成 `true`，让“只推 approved + 曝光人数上限”两条生效。
 
 闸门查询失败时保守处理：挡下全部候选（宁可这次不推荐，也不能把未审核内容当作已审核推给用户）。曝光记录失败则不阻断推荐——推荐已经生成，不能因为记账写不进去就把它丢掉，计数偏差下一次推荐就会补上。两条路径都会打完整异常栈：外层包装只有一句“数据库操作失败”，真正的 SQL 错误在 `cause` 里。
 
@@ -444,7 +444,7 @@ POST /api/v1/auth/redeem
 
 码不存在或已 `revoked` 返回 401（`revoked` 的 `reviewer` 码同样被拒，角色不绕过停用）；兑换成功会创建用户并更新 `last_used_at`。
 
-这是 `role` 目前唯一的消费点：**审核类端点尚未实现，所以 `reviewer` 只告知身份、不拦截任何请求**。等审核端点落地时，强制点应放在端点上（校验兑换者的角色），而不是塞进 `AccessCodeFilter`——那个过滤器只判断 `X-Access-Code` 与路径中的用户标识是否一致，与角色无关，混进去会让两件事都变难查。
+`role` 的消费点是审核端点（V10 已落地，详见 `docs/architecture.md` 的《人工审核端点》）：`GET .../reviews/pending`（待审队列）与 `POST .../reviews/{strategyId}/decision`（落审核决定）由服务层 `AccessCodeService.requireReviewer` 强制校验角色，非 `reviewer` 返回 403。强制点放在服务层而不是塞进 `AccessCodeFilter`——那个过滤器只判断 `X-Access-Code` 与路径中的用户标识是否一致，与角色无关，混进去会让两件事都变难查。首批 13 条策略已于 2026-09-12 审核完成（11 `approved` + 2 `rejected`+`paused`）。
 
 ### 模型调用日志
 
