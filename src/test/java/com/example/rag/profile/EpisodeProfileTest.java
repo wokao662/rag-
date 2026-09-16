@@ -114,6 +114,35 @@ class EpisodeProfileTest {
     }
 
     @Test
+    void withoutActiveEpisodesHidesEpisodeListButKeepsSharedLayer() {
+        JsonObject seeded = merger.merge(
+                EpisodeProfile.normalize(new JsonObject()),
+                updatesOf("learningGoal", "过四级听力"), decision("new", "", "四级听力"), UUID.randomUUID());
+        seeded.getAsJsonObject("shared").add("preferredLearningStyle", field("看视频"));
+
+        JsonObject blank = EpisodeProfile.withoutActiveEpisodes(seeded);
+
+        assertEquals(0, EpisodeProfile.episodeSummaries(blank).size(), "新会话首条消息不应看到旧情境清单");
+        assertTrue(blank.getAsJsonObject("shared").has("preferredLearningStyle"), "共享层必须保留");
+        assertEquals(1, EpisodeProfile.episodeSummaries(seeded).size(), "原画像不能被改动");
+    }
+
+    @Test
+    void newSessionSameTopicReusesSameLabelEpisodeInsteadOfDuplicating() {
+        JsonObject existing = merger.merge(
+                EpisodeProfile.normalize(new JsonObject()),
+                updatesOf("learningGoal", "过四级听力"), decision("new", "", "四级听力"), UUID.randomUUID());
+
+        // 模拟新会话首条消息：抽取器看不到旧清单、模型开新情境，合并回真实画像时按同名复用。
+        JsonObject merged = merger.merge(
+                existing, updatesOf("mainDifficulty", "跟不上语速"), decision("new", "", "四级听力"), UUID.randomUUID());
+
+        assertEquals(1, merged.getAsJsonArray("episodes").size(), "同名情境应复用，不产生重复");
+        assertEquals("四级听力", EpisodeProfile.activeEpisode(merged).get("label").getAsString());
+        assertTrue(EpisodeProfile.activeEpisode(merged).has("mainDifficulty"));
+    }
+
+    @Test
     void enforceActiveLimitArchivesOldestButKeepsCurrent() {
         JsonObject profile = EpisodeProfile.normalize(new JsonObject());
         for (int i = 0; i < 6; i++) {

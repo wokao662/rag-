@@ -73,7 +73,7 @@ Qdrant 不负责保存完整用户会话，也不替代 PostgreSQL。
 
 每个字段需要包含值、来源类型、置信度和原文证据。
 
-抽取器每轮除字段外还输出 `episodeDecision`：判断这条消息是「继续」某个已有情境（`action=continue` + `episodeId`）还是「开新」（`action=new` + 不超过 12 字的中文 `label`）。规则：拿不准优先 `continue` 防碎片化、同一学科下不同任务算不同情境、已有情境清单为空时一律 `new`。输入里的 `existingEpisodes`（id/label/goal/content）由 `EpisodeProfile.episodeSummaries` 从当前活跃情境生成；决策的实际落地见《画像校验与合并》。
+抽取器每轮除字段外还输出 `episodeDecision`：判断这条消息是「继续」某个已有情境（`action=continue` + `episodeId`）还是「开新」（`action=new` + 不超过 12 字的中文 `label`）。规则：拿不准优先 `continue` 防碎片化、同一学科下不同任务算不同情境、已有情境清单为空时一律 `new`。输入里的 `existingEpisodes`（id/label/goal/content）由 `EpisodeProfile.episodeSummaries` 从活跃情境清单生成。**新会话的首条消息对抽取器隐藏这份清单**（`withoutActiveEpisodes` 清空 `episodes`、保留 `shared`）：按「清单为空一律 `new`」，每个新会话天然从新情境开始——“新会话=新话题”由服务端保证，不靠模型从单条消息里猜；若新会话延续的其实是旧话题，`new` 出的同名 `label` 会被合并器的「同名复用」接回原情境。决策的实际落地见《画像校验与合并》。
 
 ### 画像校验与合并
 

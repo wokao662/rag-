@@ -95,15 +95,20 @@ public class UserProfileService {
             int version = stored.map(UserProfileRepository.StoredProfile::version).orElse(0);
             List<MessageRepository.StoredMessage> recent =
                     messages.findRecent(connection, conversationId, RECENT_MESSAGE_LIMIT);
-            return new TurnContext(userId, messageId, profile, version, recent);
+            return new TurnContext(userId, messageId, profile, version, recent, isFirstUserMessage(recent));
         });
 
         ModelReply<JsonObject> extractionReply;
         JsonObject extractInput = new JsonObject();
         extractInput.addProperty("currentUserMessage", content.trim());
         long extractStart = System.currentTimeMillis();
+        // 新会话首条消息对抽取器隐藏旧情境清单（保留共享层）：模型按"清单为空一律开新"
+        // 为新会话开新情境。"新会话=新话题"由服务端保证；合并仍走真实画像，同名情境会被复用。
+        JsonObject extractionProfile = context.firstUserMessage()
+                ? EpisodeProfile.withoutActiveEpisodes(context.profile())
+                : context.profile();
         try {
-            extractionReply = extractor.extract(context.profile(), context.recentMessages(), content.trim());
+            extractionReply = extractor.extract(extractionProfile, context.recentMessages(), content.trim());
             callLogger.log(context.userId(), conversationId, "extract", UserProfileExtractor.MODEL,
                     extractInput, extractionReply.content(), System.currentTimeMillis() - extractStart,
                     "success", null, extractionReply.usage());
@@ -236,6 +241,14 @@ public class UserProfileService {
                 ? title : title.substring(0, CONVERSATION_TITLE_LENGTH) + "…";
     }
 
+    /**
+     * recent 中恰有一条 user 消息（即刚保存的本条）时，它正是本会话的第一条用户消息。
+     * 新会话由此识别：首条消息对抽取器隐藏旧情境清单，保证"新会话=新话题"。
+     */
+    static boolean isFirstUserMessage(List<MessageRepository.StoredMessage> recent) {
+        return recent.stream().filter(message -> "user".equals(message.role())).count() == 1;
+    }
+
     private ProfileDecisionValidator.Decision decideWithFallback(
             JsonObject profile,
             List<MessageRepository.StoredMessage> recent,
@@ -321,7 +334,8 @@ public class UserProfileService {
             UUID messageId,
             JsonObject profile,
             int profileVersion,
-            List<MessageRepository.StoredMessage> recentMessages
+            List<MessageRepository.StoredMessage> recentMessages,
+            boolean firstUserMessage
     ) {
     }
 
