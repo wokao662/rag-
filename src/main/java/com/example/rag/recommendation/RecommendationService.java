@@ -11,7 +11,9 @@ import org.springframework.stereotype.Service;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -20,6 +22,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @Service
 public class RecommendationService {
     private static final int RETRIEVAL_LIMIT = 5;
+    /**
+     * 知识负载预算（字符）：拼接完成的知识超过它时按策略整组裁剪。以字符计而非 token：中文语料下
+     * 1 字符≈1 token 量级，不引入 tokenizer 即可充当保守近似。12000 ≈ 填厚前典型负载（5 个策略
+     * 全部 chunk 约 4200 字符）的 3 倍，远低于 200 点收集上限对应的十万字符量级。
+     */
+    private static final int KNOWLEDGE_BUDGET_CHARS = 12000;
 
     private final EmbeddingClient embeddingClient;
     private final QdrantClient qdrantClient;
@@ -54,8 +62,8 @@ public class RecommendationService {
 
         JsonArray knowledge;
         int filteredOut;
-        // 补齐时被预算上限挡下的 chunk 数。写在 try 外面并给初值：下面四个 logCall 分支都要用它，
-        // 包括检索本身就失败的那一条（那时确实是 0）。
+        // 被两大上限挡下的 chunk 数：Qdrant 收集侧的 200 点上限，与拼接后的知识负载预算。
+        // 写在 try 外面并给初值：下面四个 logCall 分支都要用它，包括检索本身就失败的那一条（那时确实是 0）。
         int knowledgeDropped = 0;
         try {
             ensureCollection();
@@ -69,6 +77,9 @@ public class RecommendationService {
             if (expansion.truncated()) {
                 knowledgeDropped = expansion.totalMatching() - expansion.points().size();
             }
+            BudgetedKnowledge budgeted = trimToBudget(knowledge, KNOWLEDGE_BUDGET_CHARS);
+            knowledge = budgeted.knowledge();
+            knowledgeDropped += budgeted.droppedChunks();
         } catch (IOException error) {
             logCall(userId, conversationId, queryText, 0, 0, null, start, "failed", error.getMessage(), null);
             throw new RecommendationUnavailableException("策略检索服务暂时不可用", error);
@@ -234,6 +245,47 @@ public class RecommendationService {
         return knowledge;
     }
 
+    /**
+     * 知识负载预算：逐策略整组累计字符，超预算的策略整组丢弃。粒度必须是策略而不是 chunk——
+     * 定义与步骤分离的"半截资料"比没有资料更坏，且整组裁剪保证被裁事实可数（记入 knowledgeDropped）。
+     *
+     * <p>第一个策略组无条件保留：宁可超预算，也不能让模型在空上下文里编造。
+     */
+    static BudgetedKnowledge trimToBudget(JsonArray knowledge, int budgetChars) {
+        Map<String, List<JsonObject>> groups = new LinkedHashMap<>();
+        for (JsonElement element : knowledge) {
+            JsonObject item = element.getAsJsonObject();
+            groups.computeIfAbsent(item.get("strategyId").getAsString(), key -> new ArrayList<>()).add(item);
+        }
+        Set<String> droppedIds = new HashSet<>();
+        int retainedChars = 0;
+        boolean first = true;
+        for (List<JsonObject> group : groups.values()) {
+            int groupChars = 0;
+            for (JsonObject item : group) {
+                groupChars += item.get("content").getAsString().length();
+            }
+            if (first || retainedChars + groupChars <= budgetChars) {
+                retainedChars += groupChars;
+            } else {
+                for (JsonObject item : group) {
+                    droppedIds.add(item.get("chunkId").getAsString());
+                }
+            }
+            first = false;
+        }
+        if (droppedIds.isEmpty()) {
+            return new BudgetedKnowledge(knowledge, 0);
+        }
+        JsonArray kept = new JsonArray();
+        for (JsonElement element : knowledge) {
+            if (!droppedIds.contains(element.getAsJsonObject().get("chunkId").getAsString())) {
+                kept.add(element);
+            }
+        }
+        return new BudgetedKnowledge(kept, droppedIds.size());
+    }
+
     private static JsonArray buildKnowledge(JsonArray hits) {
         JsonArray knowledge = new JsonArray();
         for (JsonElement element : hits) {
@@ -342,6 +394,10 @@ public class RecommendationService {
             List<String> followUpQuestions,
             List<EvidenceSource> evidenceSources
     ) {
+    }
+
+    /** 预算裁剪结果：保留原顺序的知识集与被整组裁掉的 chunk 数。 */
+    public record BudgetedKnowledge(JsonArray knowledge, int droppedChunks) {
     }
 
     /** 一条研究证据：结论 + 文献引用 + 可点开的原文链接。 */
