@@ -114,6 +114,46 @@ def condition_chunks(
         )
 
 
+def evidence_chunks(
+    strategy: dict[str, Any],
+    strategy_id: str,
+    name: str,
+    strategy_sources: list[str],
+) -> Iterable[dict[str, Any]]:
+    evidence = strategy.get("evidence", [])
+    if not isinstance(evidence, list):
+        raise StrategyError(f"{strategy_id}: evidence 必须是数组")
+
+    index = 0
+    for item in evidence:
+        if not isinstance(item, dict):
+            continue
+        claim = item.get("claim")
+        url = item.get("url")
+        # 只有同时有 claim 和可点开 url 的证据才生成 chunk；缺 url 的旧档案项静默跳过，
+        # 这样未填厚的策略（无 url）不会崩，也不会产出没有出处的半截证据 chunk。
+        if not isinstance(claim, str) or not claim.strip():
+            continue
+        if not isinstance(url, str) or not url.strip():
+            continue
+        index += 1
+        citation = item.get("citation")
+        if isinstance(citation, str) and citation.strip():
+            text = f"{name}的研究证据：{claim.strip()}（出处：{citation.strip()} {url.strip()}）"
+        else:
+            text = f"{name}的研究证据：{claim.strip()}（出处：{url.strip()}）"
+        yield make_chunk(
+            strategy,
+            strategy_id,
+            name,
+            "evidence",
+            index,
+            text,
+            resolve_sources(item, strategy_sources),
+            {"evidenceUrl": url.strip()},
+        )
+
+
 def generate_chunks(strategy: dict[str, Any], file: Path) -> list[dict[str, Any]]:
     strategy_id = require_string(strategy, "strategyId", file)
     name = require_string(strategy, "name", file)
@@ -143,7 +183,7 @@ def generate_chunks(strategy: dict[str, Any], file: Path) -> list[dict[str, Any]
                 name,
                 "procedure",
                 index,
-                f"{name}的第 {index} 步：{step}。",
+                f"{name}的第 {index} 步：{step.rstrip('。')}。",
                 source_ids,
                 {"stepNumber": index, "totalSteps": len(steps)},
             )
@@ -155,6 +195,7 @@ def generate_chunks(strategy: dict[str, Any], file: Path) -> list[dict[str, Any]
     chunks.extend(condition_chunks(
         strategy, strategy_id, name, "notSuitableFor", "unsuitable_condition", "不适合", source_ids
     ))
+    chunks.extend(evidence_chunks(strategy, strategy_id, name, source_ids))
     return chunks
 
 

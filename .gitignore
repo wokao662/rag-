@@ -6,6 +6,10 @@
 # Maven build output
 target/
 
+# Python cache (generator scripts)
+__pycache__/
+*.pyc
+
 # Generated RAG artifacts (rebuild from data/strategies)
 data/chunks/
 data/extracted/
