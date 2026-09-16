@@ -68,7 +68,8 @@
     "个体最优间隔需按回忆正确率微调，时间山脊曲线为群体均值。"
   ],
   "sourceIds": [
-    "source-006"
+    "source-006",
+    "source-002"
   ],
   "recommendation": {
     "evidenceScore": 0.9,

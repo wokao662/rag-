@@ -47,7 +47,7 @@
 - 合成分 `overall_score` 已算出并落库，但**未参与排序**，召回仍只按向量相似度取前 5。档位状态机的代码已写但从未被真实触发（没有任何策略累计到 20 个曝光用户）。
 - 当前命令行程序用于验证流程，不是最终产品界面。
 - 知识库内容已从“极薄”填厚到中等深度（Path 2）：13 个策略共 131 个 chunk，正文总计 10970 字符，平均每 chunk 83.7 字符（中位 70、最长 184、最短 38）。11 条真方法的 `procedure` 步骤已含动作/参数/例子三要素，并新增 24 条 `evidence` chunk 承载可点开 DOI 的研究出处；chunkType 从四类扩为五类（definition/procedure/suitable_condition/unsuitable_condition/**evidence**）。策略骨架本身正确（10/13 精确对应 Dunlosky 等人 2013 年评估的十项技术）。仍未做厚的是 2 条背景分类知识（已 `rejected`+`paused`，不进推荐），以及每条策略的证据数量还偏少（多为 2-3 条 DOI）。
-- 三个曾发现的内容质量问题，前两个已在首批审核 + Path 2 中处置，只剩第三个待办：① `strategy-learning-motivation-types` 与 `strategy-learning-strategy-classification` 的 `steps` 是空数组（背景分类知识、非可执行方法）——已 `rejected` + `exposure_state=paused` 移出推荐库；② `strategy-spaced-learning`（间隔学习）与 `strategy-distributed-practice`（间隔练习）是间隔效应的近重复——Path 2 已差异化定位（distributed 重塑为“无截止日、长期保持习惯”，spaced 保留“有明确考试时间”），且 spaced 缺的 `evidenceScore`/`effectivenessScore` 已在审核决定里补为 0.9/0.8（`overall_score` 重算 0.43）；③ **仍未处理**：`data/sources/source-002.json` 的 `authors` 与 `publisher` 同为 “S. C. Pan for UCSD Psychology”，导致 attribution 拼成重复串，待核实后修正。
+- 三个曾发现的内容质量问题已在首批审核 + Path 2 + 2026-09-16 收尾中全部处置：① `strategy-learning-motivation-types` 与 `strategy-learning-strategy-classification` 的 `steps` 是空数组（背景分类知识、非可执行方法）——已 `rejected` + `exposure_state=paused` 移出推荐库；② `strategy-spaced-learning`（间隔学习）与 `strategy-distributed-practice`（间隔练习）是间隔效应的近重复——Path 2 已差异化定位（distributed 重塑为“无截止日、长期保持习惯”，spaced 保留“有明确考试时间”），且 spaced 缺的 `evidenceScore`/`effectivenessScore` 已在审核决定里补为 0.9/0.8（`overall_score` 重算 0.43）；③ **已处置（2026-09-16）**：`data/sources/source-002.json` 的 `authors` 与 `publisher` 曾同为 “S. C. Pan for UCSD Psychology”，导致 attribution 拼成重复串；修复版把该来源的过时元数据一并修正（`sourceType` 误标、`title` 占位、URL 双斜杠），并挂入 `strategy-spaced-learning`（别名与网页标题同名）与 `strategy-distributed-practice`（步骤中 75:25 时间配比转写自该网页）两条策略的 `sourceIds`，孤儿来源接入完成。
 - 推荐链路耗时波动完全不在本项目控制范围内，曾逼近旧的超时线：同一条链路 2026-09-10 用了 23.2 秒，2026-09-11 用了 83.9 秒，早期探针还出现过一次 90.5 秒真超时（当时 `readTimeout` 是 90 秒）。**超时对策已在公网部署阶段（Task/06）决策落地**——不追着波动调阈值，而是降级为压缩输出 + 快速失败：`RecommendationChatClient` 的 `readTimeout` 收到 60 秒、`max_tokens` 压到 1200、配合关闭思维链（SiliconFlow 的结构化模式会额外叠加 17~24 秒惩罚），正常实测约 19 秒（**2026-09-16 修正**：Path 2 的 evidence 引用规则使典型输出增至约 1384 token，1200 上限反成截断源，`max_tokens` 已调至 1600）；抖动时宁可快速失败走兜底，也不让串行请求挂过 Cloudflare 免费隧道的 100 秒硬上限。V8 起 token 用量入库，09-10/09-11 这两天构成了一组同负载对照，正是它定下了下面这个结论：
 
   | 日期 | prompt | completion | 耗时 | 生成速率 |
@@ -185,7 +185,7 @@
 
 按依赖顺序排列：
 
-1. ~~人工审核现有 13 个策略~~ **已完成**（2026-09-12，11 approved + 2 rejected+paused）。剩下的只是**上线时**打开 `GOVERNANCE_REVIEW_GATE=true`（本地不必开，`paused` 已挡那 2 条）；以及处理《当前方案的临时性质》里仍未办的第三个内容质量问题（`source-002` attribution 重复串）。
+1. ~~人工审核现有 13 个策略~~ **已完成**（2026-09-12，11 approved + 2 rejected+paused）。剩下的只是**上线时**打开 `GOVERNANCE_REVIEW_GATE=true`（本地不必开，`paused` 已挡那 2 条）；《当前方案的临时性质》里三个内容质量问题也已全部处置（2026-09-16，`source-002` 元数据修正并挂入 spaced-learning 与 distributed-practice 两条策略）。
 2. 让 `overall_score` 参与排序。它已算出并落库，但全仓没有任何读取方拿它排序，召回恒按向量相似度取前 5——这意味着“反馈驱动升降权”目前只有降权（证伪 -> `pending_archive` -> 停曝光）真正生效，升权完全空转。要做需要定下相似度与合成分的混合权重，而当前 `method_trial_feedback` 为 0 行，改完无法用真实数据验证。
 3. ~~定推荐链路的超时对策~~ **超时对策已落地**（公网部署阶段）：`readTimeout` 90→60 秒、`max_tokens` 1400→1200（**2026-09-16 调至 1600**：evidence 引用规则使典型输出增至约 1384 token，1200 反成截断源）、关闭思维链，抖动时快速失败走兜底，不挂过 Cloudflare 免费隧道 100 秒上限。**这一项剩下的只有知识负载预算**：`findByStrategyIds` 的静默截断已修（分页取回 + 上限 200 + 截断量记入 `knowledgeDropped`），但 200 只是防提示词无边界的安全阀、不是按 token 算的预算，语料开始填厚前要把它换成真正的 token 预算。这一项不再阻塞前两项。
 4. 定下剩余的渐进投放参数：投稿者查看接口给到什么数据粒度（可见性**策略**已定案——卡片只有单向点赞、点赞只对投稿者可见、尝试后反馈走独立通道，2026-09-10 落地；未定的是接口暴露到哪一层）、是否需要随机曝光以避免选择偏差（当前曝光完全由检索相似度决定，被推中的策略天然更契合查询，反馈数据有偏）。
@@ -194,7 +194,7 @@
 7. 定义适合人群预测模型的标签体系和人工标注规范，暂不急于训练模型。
 8. 建立小型对话评测集，覆盖信息不足、一次说清、前后矛盾和拒绝回答等情况。
 
-已完成并从本列表移除：对话画像 Agent 的单元测试与手动中文对话测试；将 `ready=true` 接入 Qdrant 检索；Spring Boot API 与 Web 页面；渐进投放的主要待定参数（曝光机制取人数上限、最小反馈门槛 10 条、Wilson 下界、合成权重 0.3/0.5/0.2、归档只标记）；`sources`/`strategies`/`strategy_chunks` 存储层；`reviewStatus` 取值统一；检索侧的元数据过滤与闸门；审核者角色的表达（`access_codes.role` 列 + `redeem` 返回）；**审核端点与角色强制点**（V10，含待审队列、通过/驳回、`reviewer_score` 与两个证据分的补分入口，并把四个自 V6 起无人写入的审核列接上）；`findByStrategyIds` 的静默截断；observed 层级的采集；**首批人工审核**（2026-09-12，13 条逐条终审：11 approved + 2 rejected+paused，`reviewer_score` 齐全）；**Path 2 内容填厚与 evidence chunk**（V11/V12，11 条真方法扩写、新增第五类 `evidence` chunk 承载可点开 DOI，chunk 107→131、正文 4356→10970 字符）。
+已完成并从本列表移除：对话画像 Agent 的单元测试与手动中文对话测试；将 `ready=true` 接入 Qdrant 检索；Spring Boot API 与 Web 页面；渐进投放的主要待定参数（曝光机制取人数上限、最小反馈门槛 10 条、Wilson 下界、合成权重 0.3/0.5/0.2、归档只标记）；`sources`/`strategies`/`strategy_chunks` 存储层；`reviewStatus` 取值统一；检索侧的元数据过滤与闸门；审核者角色的表达（`access_codes.role` 列 + `redeem` 返回）；**审核端点与角色强制点**（V10，含待审队列、通过/驳回、`reviewer_score` 与两个证据分的补分入口，并把四个自 V6 起无人写入的审核列接上）；`findByStrategyIds` 的静默截断；observed 层级的采集；**首批人工审核**（2026-09-12，13 条逐条终审：11 approved + 2 rejected+paused，`reviewer_score` 齐全）；**Path 2 内容填厚与 evidence chunk**（V11/V12，11 条真方法扩写、新增第五类 `evidence` chunk 承载可点开 DOI，chunk 107→131、正文 4356→10970 字符）；**`source-002` 元数据修正与孤儿引用接入**（2026-09-16，挂入 `spaced-learning` 与 `distributed-practice` 两条策略的 `sourceIds`，DB/Qdrant 三方同步）。
 
 ## 暂不优先
 
