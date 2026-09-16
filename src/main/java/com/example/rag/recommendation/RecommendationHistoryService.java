@@ -84,6 +84,7 @@ public class RecommendationHistoryService {
                                 textList(strategy, "methodSteps"),
                                 textList(strategy, "sourceIds"),
                                 textList(strategy, "caveats"),
+                                evidenceFor(recommendation, strategyId),
                                 likedStrategies.contains(strategyId),
                                 toTrialState(trialByStrategy.get(strategyId))
                         ));
@@ -146,6 +147,20 @@ public class RecommendationHistoryService {
         return new TrialState(
                 trial.tried(), trial.outcome(), trial.note(),
                 trial.updatedAt() == null ? null : trial.updatedAt().toString());
+    }
+
+    /** 从推荐快照里取出该策略的研究证据；旧快照没有 evidenceSources 字段时返回空列表。 */
+    private static List<RecommendationService.EvidenceSource> evidenceFor(JsonObject recommendation, String strategyId) {
+        JsonArray array = asArray(recommendation.get("evidenceSources"));
+        if (array == null) return List.of();
+        List<RecommendationService.EvidenceSource> evidence = new ArrayList<>();
+        for (JsonElement element : array) {
+            JsonObject item = asObject(element);
+            if (item == null || !strategyId.equals(text(item, "strategyId"))) continue;
+            evidence.add(new RecommendationService.EvidenceSource(
+                    strategyId, text(item, "claim"), text(item, "citation"), text(item, "url")));
+        }
+        return List.copyOf(evidence);
     }
 
     private UUID requireUser(Connection connection, String externalId) throws SQLException {
@@ -220,6 +235,7 @@ public class RecommendationHistoryService {
             List<String> methodSteps,
             List<String> sourceIds,
             List<String> caveats,
+            List<RecommendationService.EvidenceSource> evidence,
             boolean liked,
             TrialState trial
     ) {

@@ -110,14 +110,21 @@ class UserProfileControllerTest {
                         "strategy-distributed-practice", "分散练习", "适合记单词很快忘的情况",
                         List.of("把复习分散到多天"), List.of("source-001"),
                         List.of("chunk-1"), List.of())),
-                List.of());
+                List.of(),
+                List.of(new RecommendationService.EvidenceSource(
+                        "strategy-distributed-practice", "分散练习的长期保持收益稳健。",
+                        "Cepeda et al. (2006)", "https://doi.org/10.1037/0033-2909.132.3.354")));
         when(profileService.recommend("web-user-001")).thenReturn(result);
 
         mockMvc.perform(post("/api/v1/users/web-user-001/recommendations"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("answer"))
                 .andExpect(jsonPath("$.recommendations[0].strategyName").value("分散练习"))
-                .andExpect(jsonPath("$.recommendations[0].citations[0]").value("chunk-1"));
+                .andExpect(jsonPath("$.recommendations[0].citations[0]").value("chunk-1"))
+                .andExpect(jsonPath("$.evidenceSources[0].claim").value("分散练习的长期保持收益稳健。"))
+                .andExpect(jsonPath("$.evidenceSources[0].citation").value("Cepeda et al. (2006)"))
+                .andExpect(jsonPath("$.evidenceSources[0].url")
+                        .value("https://doi.org/10.1037/0033-2909.132.3.354"));
     }
 
     @Test
@@ -171,6 +178,9 @@ class UserProfileControllerTest {
                         List.of(new RecommendationHistoryService.RecommendedMethod(
                                 "strategy-practice-testing", "练习测试", "适合看过书但记不住的情况",
                                 List.of("合上书本回想主要内容"), List.of("source-006"), List.of(),
+                                List.of(new RecommendationService.EvidenceSource(
+                                        "strategy-practice-testing", "检索练习的收益稳健。",
+                                        "Rowland (2014)", "https://doi.org/10.1037/a0037559")),
                                 true,
                                 new RecommendationHistoryService.TrialState(
                                         true, "helpful", "确实记住了", "2026-09-10T12:00:00Z"))))));
@@ -180,6 +190,7 @@ class UserProfileControllerTest {
                 .andExpect(jsonPath("$[0].messageId").value(messageId.toString()))
                 .andExpect(jsonPath("$[0].methods[0].strategyName").value("练习测试"))
                 .andExpect(jsonPath("$[0].methods[0].liked").value(true))
+                .andExpect(jsonPath("$[0].methods[0].evidence[0].citation").value("Rowland (2014)"))
                 .andExpect(jsonPath("$[0].methods[0].trial.outcome").value("helpful"));
     }
 

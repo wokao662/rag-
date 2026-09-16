@@ -294,7 +294,7 @@ public final class StrategyImporter {
             if (effectiveness == null) missing.add("effectivenessScore");
             if (!missing.isEmpty()) {
                 warnings.add(strategyId + "：档案缺少 " + String.join(" 与 ", missing)
-                        + "，按 0 导入，需要审核者补分");
+                        + missingScoreHint(connection, strategyId));
             }
         }
 
@@ -314,6 +314,29 @@ public final class StrategyImporter {
             statement.setBoolean(12, archiveMissing);
             try (ResultSet result = statement.executeQuery()) {
                 return result.next() && result.getBoolean("inserted");
+            }
+        }
+    }
+
+    /**
+     * 缺分策略的警告尾句。upsert 的守卫只在 review_status = 'draft' 时跟随档案，
+     * 已审核策略即使档案缺分也保留库内既有分数——文案必须说清楚，
+     * 否则重跑导入器时会把“守卫保留”误读成“审核分被打回”。
+     */
+    private static String missingScoreHint(Connection connection, String strategyId) throws SQLException {
+        String status = reviewStatusOf(connection, strategyId);
+        if (status == null || "draft".equals(status)) {
+            return "，按 0 导入，需要审核者补分";
+        }
+        return "，该策略已审核（" + status + "），保留库内既有分数；请补充档案";
+    }
+
+    private static String reviewStatusOf(Connection connection, String strategyId) throws SQLException {
+        try (PreparedStatement statement =
+                     connection.prepareStatement("SELECT review_status FROM strategies WHERE strategy_id = ?")) {
+            statement.setString(1, strategyId);
+            try (ResultSet result = statement.executeQuery()) {
+                return result.next() ? result.getString(1) : null;
             }
         }
     }

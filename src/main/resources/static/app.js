@@ -280,6 +280,12 @@ function renderRecommendation(result, messageId, likedStrategies) {
             block.appendChild(note);
         });
 
+        const evidence = (result.evidenceSources || [])
+            .filter(item => item.strategyId === recommendation.strategyId);
+        if (evidence.length > 0) {
+            block.appendChild(renderEvidence(evidence));
+        }
+
         const meta = document.createElement("p");
         meta.className = "meta";
         meta.textContent = "来源 " + (recommendation.sourceIds || []).join("、");
@@ -302,6 +308,41 @@ function renderRecommendation(result, messageId, likedStrategies) {
     });
 
     return card;
+}
+
+/**
+ * 研究依据块：一句话结论 + 文献引用 + 可点开的原文链接。
+ * 数据来自后端的 evidenceSources（证据 chunk 的结构化拆解），没证据时不渲染。
+ */
+function renderEvidence(evidence) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "evidence";
+    const title = document.createElement("p");
+    title.className = "evidence-title";
+    title.textContent = "研究依据";
+    wrapper.appendChild(title);
+    evidence.forEach(item => {
+        const line = document.createElement("p");
+        line.className = "evidence-item";
+        line.textContent = item.claim || "研究证据";
+        if (item.citation) {
+            const citation = document.createElement("span");
+            citation.className = "evidence-citation";
+            citation.textContent = item.citation;
+            line.appendChild(citation);
+        }
+        if (item.url) {
+            const link = document.createElement("a");
+            link.className = "evidence-link";
+            link.href = item.url;
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            link.textContent = "原文 ↗";
+            line.appendChild(link);
+        }
+        wrapper.appendChild(line);
+    });
+    return wrapper;
 }
 
 /**
@@ -555,6 +596,10 @@ function renderByMethod() {
                 steps.appendChild(item);
             });
             card.appendChild(steps);
+        }
+
+        if (entry.method.evidence && entry.method.evidence.length > 0) {
+            card.appendChild(renderEvidence(entry.method.evidence));
         }
 
         const meta = document.createElement("p");
