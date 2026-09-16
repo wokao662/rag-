@@ -63,10 +63,10 @@ public final class ConversationalProfileAgent implements AutoCloseable {
               "action": "ask 或 recommend",
               "ready": true或false,
               "confidence": 0到1,
+              "nextQuestion": "ask 时：上面要求的那段有温度的回复（接住用户+可选小提示+末尾一个问题）；recommend 时为空字符串",
               "reason": "判断依据",
               "missingInformation": ["仍然重要的未知信息"],
-              "conflicts": ["需要用户确认的冲突"],
-              "nextQuestion": "ask 时：上面要求的那段有温度的回复（接住用户+可选小提示+末尾一个问题）；recommend 时为空字符串"
+              "conflicts": ["需要用户确认的冲突"]
             }
             """;
 
