@@ -1,5 +1,7 @@
 package com.example.rag.recommendation;
 
+import com.example.rag.llm.ChatStreamReader;
+import com.example.rag.llm.JsonFieldStreamExtractor;
 import com.example.rag.llm.ModelJson;
 import com.example.rag.observability.ModelReply;
 import com.example.rag.observability.TokenUsage;
@@ -15,6 +17,7 @@ import okhttp3.Response;
 
 import java.io.IOException;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 /** 调用聊天模型，基于检索到的策略 chunk 为当前画像生成结构化推荐；不直接写数据库。 */
 public final class RecommendationChatClient implements AutoCloseable {
@@ -90,38 +93,8 @@ public final class RecommendationChatClient implements AutoCloseable {
 
     public ModelReply<JsonObject> generate(JsonObject profile, String queryText, JsonArray knowledge)
             throws IOException {
-        JsonObject body = new JsonObject();
-        body.addProperty("model", MODEL);
-        body.addProperty("temperature", 0.1);
-        // 上限 1600：evidence 引用规则上线后，成功输出实测 1168/1200（余量仅 3%），
-        // 随后连续出现“输出被截断成非法 JSON”的失败，原上限已不够容纳三个策略、
-        // 每个策略 2~5 条 citations 的正常输出。上限只约束截断点，不改变正常生成开销。
-        body.addProperty("max_tokens", 1600);
+        JsonObject body = generateBody(profile, queryText, knowledge);
         body.addProperty("stream", false);
-        // 关思维链 + 不用 response_format:json_object：实测该结构化模式在 SiliconFlow 上会额外
-        // 叠加 17~24 秒固定惩罚，叠在本路 ~893 token 的生成时间上极易击穿 60 秒读超时；
-        // 去掉后靠 system prompt 约束 + ModelJson 兜底解析。
-        body.addProperty("enable_thinking", false);
-
-        JsonArray messages = new JsonArray();
-        messages.add(message("system", SYSTEM_PROMPT));
-        String userPrompt = """
-                <learner_profile>
-                %s
-                </learner_profile>
-
-                <retrieval_query>
-                %s
-                </retrieval_query>
-
-                <reference_materials>
-                %s
-                </reference_materials>
-
-                请严格依据参考资料，按系统消息规定的 JSON 结构回答。
-                """.formatted(GSON.toJson(profile), queryText, GSON.toJson(knowledge));
-        messages.add(message("user", userPrompt));
-        body.add("messages", messages);
 
         Request request = new Request.Builder()
                 .url(API_URL)
@@ -159,6 +132,90 @@ public final class RecommendationChatClient implements AutoCloseable {
                 throw new IOException("推荐响应结构异常：" + error.getMessage(), error);
             }
         }
+    }
+
+    /**
+     * generate 的流式版本：answer 字段的增量文本在生成过程中就交给 onAnswerDelta，
+     * 用户在推荐结果组装完成前先看到开头的话逐字出现。解析失败抛与 generate 相同的
+     * MalformedOutputException（带已消耗的用量），调用方的日志与兜底无需区分两种形态。
+     */
+    public ModelReply<JsonObject> generateStream(JsonObject profile, String queryText, JsonArray knowledge,
+                                                 Consumer<String> onAnswerDelta) throws IOException {
+        JsonObject body = generateBody(profile, queryText, knowledge);
+        body.addProperty("stream", true);
+        JsonObject streamOptions = new JsonObject();
+        streamOptions.addProperty("include_usage", true);
+        body.add("stream_options", streamOptions);
+
+        Request request = new Request.Builder()
+                .url(API_URL)
+                .header("Authorization", "Bearer " + apiKey)
+                .post(RequestBody.create(body.toString(), JSON))
+                .build();
+        try (Response response = client.newCall(request).execute()) {
+            if (!response.isSuccessful()) {
+                String responseBody = response.body() == null ? "" : response.body().string();
+                throw new IOException("推荐生成请求失败 (HTTP " + response.code() + "): " + responseBody);
+            }
+            try {
+                JsonFieldStreamExtractor extractor = new JsonFieldStreamExtractor("answer");
+                ChatStreamReader.StreamResult stream = ChatStreamReader.read(response, accumulated -> {
+                    String delta = extractor.accept(accumulated);
+                    if (!delta.isEmpty()) onAnswerDelta.accept(delta);
+                });
+                TokenUsage usage = stream.usage();
+                try {
+                    return new ModelReply<>(ModelJson.parseObject(stream.content()), usage);
+                } catch (IllegalArgumentException malformed) {
+                    // finish_reason 从流里带出来：区分“顶到 max_tokens 被截断”（length）与
+                    // “模型输出畸形”（stop）的唯一证据在流式路径同样要保留。
+                    throw new MalformedOutputException("推荐模型没有返回合法 JSON（finish_reason="
+                            + (stream.finishReason() == null ? "未知" : stream.finishReason())
+                            + "，completion_tokens="
+                            + (usage == null ? "未知" : usage.completionTokens())
+                            + "，content 长度=" + stream.content().length()
+                            + "，content 尾部：" + tail(stream.content()) + "）", usage, malformed);
+                }
+            } catch (RuntimeException error) {
+                throw new IOException("推荐响应结构异常：" + error.getMessage(), error);
+            }
+        }
+    }
+
+    /** stream 开关由两个入口各自补上：非流式路径的行为不因本次改动而变。 */
+    private JsonObject generateBody(JsonObject profile, String queryText, JsonArray knowledge) {
+        JsonObject body = new JsonObject();
+        body.addProperty("model", MODEL);
+        body.addProperty("temperature", 0.1);
+        // 上限 1600：evidence 引用规则上线后，成功输出实测 1168/1200（余量仅 3%），
+        // 随后连续出现“输出被截断成非法 JSON”的失败，原上限已不够容纳三个策略、
+        // 每个策略 2~5 条 citations 的正常输出。上限只约束截断点，不改变正常生成开销。
+        body.addProperty("max_tokens", 1600);
+        // 关思维链 + 不用 response_format:json_object：实测该结构化模式在 SiliconFlow 上会额外
+        // 叠加 17~24 秒固定惩罚，叠在本路 ~893 token 的生成时间上极易击穿 60 秒读超时；
+        // 去掉后靠 system prompt 约束 + ModelJson 兜底解析。
+        body.addProperty("enable_thinking", false);
+
+        JsonArray messages = new JsonArray();
+        messages.add(message("system", SYSTEM_PROMPT));
+        String userPrompt = """
+                <learner_profile>
+                %s
+                </learner_profile>
+
+                <retrieval_query>
+                %s
+                </retrieval_query>
+
+                <reference_materials>
+                %s
+                </reference_materials>
+
+                请严格依据参考资料，按系统消息规定的 JSON 结构回答。
+                """.formatted(GSON.toJson(profile), queryText, GSON.toJson(knowledge));
+        messages.add(message("user", userPrompt));
+        body.add("messages", messages);
+        return body;
     }
 
     private static JsonObject message(String role, String content) {

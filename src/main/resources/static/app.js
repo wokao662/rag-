@@ -70,6 +70,13 @@ const elements = {
     historyStatus: document.getElementById("historyStatus")
 };
 
+/** 流式事件里的阶段提示文案（stage 事件 → “正在…”），与后端 TurnStreamSink 的 stage 取值对应。 */
+const STAGE_LABELS = {
+    extract: "正在理解你的情况…",
+    decide: "正在想怎么回复你…",
+    recommend: "正在检索合适的学习策略…"
+};
+
 function apiUrl(path) {
     return `/api/v1/users/${encodeURIComponent(externalId)}${path}`;
 }
@@ -173,24 +180,48 @@ async function sendMessage(event) {
         const typing = renderTyping();
         scrollToBottom();
 
-        try {
-            const turn = await http("POST", `/conversations/${conversationId}/messages`, { content });
+        // 流式渲染：第一段文字一到就撤掉“正在输入”，之后的增量直接追加。
+        // 中途增量都不权威（模型半路失败会换成兜底文本），最终以 final 事件为准。
+        let bubble = null;
+        let streamedText = "";
+        let finalTurn = null;
+        let streamError = null;
+
+        const showDelta = delta => {
             typing.remove();
-            if (turn.assistantMessage) {
-                renderMessage({ role: "assistant", content: turn.assistantMessage });
+            if (!bubble) bubble = createAssistantBubble();
+            streamedText += delta;
+            bubble.textContent = streamedText;
+            scrollToBottom();
+        };
+
+        try {
+            await streamTurn(content, {
+                onStage: stage => setTypingLabel(typing, STAGE_LABELS[stage]),
+                onDelta: showDelta,
+                onFinal: turn => { finalTurn = turn; },
+                onError: message => { streamError = message; }
+            });
+        } finally {
+            typing.remove();
+        }
+
+        if (streamError) {
+            showStatus(streamError);
+        } else if (finalTurn) {
+            const authoritative = finalTurn.recommendation
+                ? finalTurn.recommendation.answer
+                : (finalTurn.assistantMessage || "");
+            if (authoritative) {
+                if (!bubble) bubble = createAssistantBubble();
+                bubble.textContent = authoritative;
             }
-            if (turn.recommendation) {
-                renderMessage({
-                    role: "assistant",
-                    content: turn.recommendation.answer,
-                    recommendation: turn.recommendation,
-                    messageId: turn.assistantMessageId
-                });
+            if (finalTurn.recommendation && bubble) {
+                bubble.appendChild(renderRecommendation(
+                    finalTurn.recommendation, finalTurn.assistantMessageId || null, []));
             }
             loadProfile();
             loadConversations();
-        } finally {
-            typing.remove();
         }
     } catch (error) {
         showStatus(error.message);
@@ -234,10 +265,103 @@ function renderTyping() {
     const row = document.createElement("div");
     row.className = "message-row assistant typing";
     row.innerHTML = '<div class="avatar">策</div><div class="message-body">' +
-        '<div class="bubble"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div></div>';
+        '<div class="bubble"><span class="dot"></span><span class="dot"></span><span class="dot"></span>' +
+        '<span class="typing-label"></span></div></div>';
     elements.messages.appendChild(row);
     scrollToBottom();
     return row;
+}
+
+/** 流式文本到达时创建的空助手气泡；结构与会话历史里的助手消息保持一致。 */
+function createAssistantBubble() {
+    const row = document.createElement("div");
+    row.className = "message-row assistant";
+    const avatar = document.createElement("div");
+    avatar.className = "avatar";
+    avatar.textContent = "策";
+    row.appendChild(avatar);
+    const body = document.createElement("div");
+    body.className = "message-body";
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    body.appendChild(bubble);
+    row.appendChild(body);
+    elements.messages.appendChild(row);
+    return bubble;
+}
+
+/** stage 事件驱动的等待提示；typing 行已被真实气泡替换后就什么都不做。 */
+function setTypingLabel(typingRow, text) {
+    if (!text || !typingRow.isConnected) return;
+    const label = typingRow.querySelector(".typing-label");
+    if (label) label.textContent = text;
+}
+
+/**
+ * POST 消息并以 SSE 读取处理进度。不用 EventSource 的原因：它只支持 GET，
+ * 而发消息必须带请求体；fetch 的 body 流可以逐块读到服务端推来的事件帧。
+ */
+async function streamTurn(content, handlers) {
+    const headers = { "Content-Type": "application/json; charset=utf-8", "Accept": "text/event-stream" };
+    if (accessCode) headers["X-Access-Code"] = accessCode;
+    const response = await fetch(apiUrl(`/conversations/${conversationId}/messages/stream`), {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ content })
+    });
+    if (response.status === 401) {
+        localStorage.removeItem("accessCode");
+        accessCode = "";
+        showAccessGate();
+        throw new Error("需要有效的访问码");
+    }
+    if (!response.ok) {
+        let detail = "操作没有成功，请稍后再试";
+        try {
+            const problem = await response.json();
+            if (problem.detail) detail = problem.detail;
+        } catch (ignored) {
+            // 保留默认错误信息
+        }
+        throw new Error(detail);
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let separator;
+        while ((separator = buffer.indexOf("\n\n")) >= 0) {
+            dispatchStreamFrame(buffer.slice(0, separator), handlers);
+            buffer = buffer.slice(separator + 2);
+        }
+    }
+    // 服务端正常结束时事件也以空行收尾；buffer 里若剩残帧（连接被截断）做防御性处理。
+    if (buffer.trim()) dispatchStreamFrame(buffer, handlers);
+}
+
+/** 解析一个 SSE 事件帧（event: 行 + data: 行）并派发给对应回调。 */
+function dispatchStreamFrame(frame, handlers) {
+    let eventName = "message";
+    const dataLines = [];
+    frame.split("\n").forEach(rawLine => {
+        const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+        if (line.startsWith("event:")) eventName = line.slice(6).trim();
+        else if (line.startsWith("data:")) dataLines.push(line.slice(5).replace(/^ /, ""));
+    });
+    if (!dataLines.length) return;
+    let payload;
+    try {
+        payload = JSON.parse(dataLines.join("\n"));
+    } catch (ignored) {
+        return;
+    }
+    if (eventName === "stage") handlers.onStage(payload.stage);
+    else if (eventName === "delta") handlers.onDelta(payload.text || "");
+    else if (eventName === "final") handlers.onFinal(payload);
+    else if (eventName === "error") handlers.onError(payload.message || "服务暂时不可用，请稍后再试");
 }
 
 function renderRecommendation(result, messageId, likedStrategies) {

@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 /** 编排完整推荐链路：画像生成检索文本、Qdrant 召回、治理闸门过滤、聊天模型生成、Java 校验。 */
 @Service
@@ -56,7 +57,29 @@ public class RecommendationService {
         this.governance = governance;
     }
 
+    /** 推荐生成调用的两种形态（整块 / 流式）共用同一条管线，入口方法只决定怎么调。 */
+    @FunctionalInterface
+    private interface ChatGenerator {
+        ModelReply<JsonObject> generate(JsonObject profile, String queryText, JsonArray knowledge) throws IOException;
+    }
+
     public RecommendationResult recommend(JsonObject profile, UUID userId, UUID conversationId) {
+        return recommendInternal(profile, userId, conversationId, chatClient::generate);
+    }
+
+    /**
+     * recommend 的流式版本：answer 字段的增量文本在生成过程中就交给 onAnswerDelta
+     * （用户先看到开头的话逐字出现），检索、闸门、校验、日志照常，返回结果与 recommend 同构。
+     */
+    public RecommendationResult recommendStreaming(JsonObject profile, UUID userId, UUID conversationId,
+                                                   Consumer<String> answerDelta) {
+        return recommendInternal(profile, userId, conversationId,
+                (queryProfile, queryText, knowledge) ->
+                        chatClient.generateStream(queryProfile, queryText, knowledge, answerDelta));
+    }
+
+    private RecommendationResult recommendInternal(JsonObject profile, UUID userId, UUID conversationId,
+                                                   ChatGenerator generator) {
         String queryText = queryBuilder.build(profile);
         long start = System.currentTimeMillis();
 
@@ -96,7 +119,7 @@ public class RecommendationService {
 
         ModelReply<JsonObject> reply;
         try {
-            reply = chatClient.generate(profile, queryText, knowledge);
+            reply = generator.generate(profile, queryText, knowledge);
         } catch (IOException error) {
             // 内容解析失败时 token 已经花掉了：MalformedOutputException 自带用量，照记不丢。
             // 其余失败（HTTP 错误、响应结构异常）确实没有可用的用量，维持 null。

@@ -4,12 +4,15 @@ import com.example.rag.profile.UserProfileService;
 import com.example.rag.recommendation.FeedbackService;
 import com.example.rag.recommendation.RecommendationHistoryService;
 import com.example.rag.recommendation.RecommendationService;
+import jakarta.annotation.PreDestroy;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -18,14 +21,20 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 @Validated
 @RestController
 @RequestMapping("/api/v1/users/{externalId}")
 public class UserProfileController {
+    /** SSE 流最多挂 120 秒；Cloudflare 免费隧道的 100 秒硬上限会先到，这里只留安全余量。 */
+    private static final long STREAM_TIMEOUT_MS = 120_000L;
+
     private final UserProfileService profileService;
     private final FeedbackService feedbackService;
     private final RecommendationHistoryService historyService;
@@ -39,6 +48,16 @@ public class UserProfileController {
         this.feedbackService = feedbackService;
         this.historyService = historyService;
     }
+
+    /**
+     * 流式处理在独立线程池上跑：SSE 端点必须立刻返回 emitter，模型管线（最长约 30 秒）放到
+     * 后台线程逐事件推送。8 个线程够测试规模并发；daemon 线程不阻塞进程退出。
+     */
+    private final ExecutorService streamExecutor = Executors.newFixedThreadPool(8, runnable -> {
+        Thread thread = new Thread(runnable, "turn-stream");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     @GetMapping("/conversations")
     public List<UserProfileService.ConversationSummary> listConversations(
@@ -65,6 +84,46 @@ public class UserProfileController {
             @Valid @RequestBody SendMessageRequest request
     ) {
         return profileService.processMessage(externalId, conversationId, request.content());
+    }
+
+    /**
+     * 发消息的流式版本：同一轮处理以 SSE 推送进度与增量文本（事件协议见 api.TurnStreamSink）。
+     * 前端拿 final 事件里的 TurnResult 做最终渲染，与非流式接口完全同构。
+     */
+    @PostMapping(value = "/conversations/{conversationId}/messages/stream",
+            produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter sendMessageStreaming(
+            @PathVariable @NotBlank @Size(max = 128)
+            @Pattern(regexp = "[A-Za-z0-9._-]+") String externalId,
+            @PathVariable UUID conversationId,
+            @Valid @RequestBody SendMessageRequest request
+    ) {
+        SseEmitter emitter = new SseEmitter(STREAM_TIMEOUT_MS);
+        TurnStreamSink sink = new TurnStreamSink(emitter);
+        streamExecutor.execute(() -> {
+            try {
+                profileService.processMessageStreaming(externalId, conversationId, request.content(), sink);
+            } catch (Exception error) {
+                sink.error(streamErrorMessage(error));
+            } finally {
+                sink.complete();
+            }
+        });
+        return emitter;
+    }
+
+    /** 与非流式接口的 ApiExceptionHandler 保持同一套用户可读文案。 */
+    private static String streamErrorMessage(Exception error) {
+        if (error instanceof DataAccessException) return "数据库暂时不可用，请稍后重试";
+        if (error instanceof UserProfileService.ProfileModelException
+                || error instanceof UserProfileService.ProfileNotFoundException
+                || error instanceof UserProfileService.ConversationNotFoundException
+                || error instanceof UserProfileService.ProfileConflictException
+                || error instanceof IllegalArgumentException) {
+            String message = error.getMessage();
+            if (message != null && !message.isBlank()) return message;
+        }
+        return "服务暂时不可用，请稍后再试";
     }
 
     @GetMapping("/conversations/{conversationId}/messages")
@@ -167,5 +226,11 @@ public class UserProfileController {
             @Size(max = 10_000, message = "content 不能超过 10000 个字符")
             String content
     ) {
+    }
+
+    /** 应用关闭时停掉流式线程池；已在跑的一轮会随线程中断结束（此时连接本已随关闭断开）。 */
+    @PreDestroy
+    void shutdownStreamExecutor() {
+        streamExecutor.shutdownNow();
     }
 }

@@ -218,6 +218,13 @@ header h1 {
     animation-delay: 0.4s;
 }
 
+.typing .typing-label {
+    margin-left: 8px;
+    font-size: 12px;
+    color: #8a8f99;
+    white-space: nowrap;
+}
+
 @keyframes blink {
     0%, 60%, 100% { opacity: 0.3; }
     30% { opacity: 1; }
