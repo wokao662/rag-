@@ -210,6 +210,19 @@ public final class EpisodeProfile {
     }
 
     /**
+     * 新会话首条消息的抽取向导：清空情境清单（保留共享层）。
+     *
+     * <p>抽取器拿到它后按「清单为空时一律开新」的既有规则为新会话开新情境——
+     * “新会话=新话题”的边界由服务端保证，而不是靠模型从单条消息里猜。
+     * 合并仍基于真实画像进行：延续旧话题时 new 出的同名情境会被 {@link UserProfileMerger} 复用回去。
+     */
+    public static JsonObject withoutActiveEpisodes(JsonObject profile) {
+        JsonObject copy = normalize(profile);
+        copy.add(KEY_EPISODES, new JsonArray());
+        return copy;
+    }
+
+    /**
      * 给 extractor 的活跃情境摘要清单：id + label + 一句目标/内容，供模型判断"续哪个还是开新"。
      * 只列活跃情境，归档的不参与归属判断。
      */
