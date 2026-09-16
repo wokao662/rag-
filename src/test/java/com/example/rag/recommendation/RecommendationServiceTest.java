@@ -116,6 +116,67 @@ class RecommendationServiceTest {
         assertEquals("", sources.get(1).citation());
     }
 
+    @Test
+    void budgetDropsWholeStrategiesBeyondLimitButKeepsFirst() {
+        JsonArray knowledge = new JsonArray();
+        knowledge.add(knowledgeEntry("definition", "a-1", "strategy-a", "A", "x".repeat(30)));
+        knowledge.add(knowledgeEntry("steps", "a-2", "strategy-a", "A", "x".repeat(30)));
+        knowledge.add(knowledgeEntry("definition", "b-1", "strategy-b", "B", "x".repeat(30)));
+        knowledge.add(knowledgeEntry("definition", "c-1", "strategy-c", "C", "x".repeat(30)));
+        knowledge.add(knowledgeEntry("steps", "c-2", "strategy-c", "C", "x".repeat(30)));
+
+        // 预算 100：A 组 60 字符（首组无条件保留）→ B 组 30 字符（60+30 ≤ 100，保留）→
+        // C 组 60 字符（90+60 > 100，整组裁掉，两个 chunk 一起走）。
+        RecommendationService.BudgetedKnowledge budgeted = RecommendationService.trimToBudget(knowledge, 100);
+
+        assertEquals(3, budgeted.knowledge().size());
+        assertEquals(2, budgeted.droppedChunks());
+        assertEquals("b-1", budgeted.knowledge().get(2).getAsJsonObject().get("chunkId").getAsString());
+    }
+
+    @Test
+    void budgetKeepsFirstStrategyEvenWhenAloneOverLimit() {
+        JsonArray knowledge = new JsonArray();
+        knowledge.add(knowledgeEntry("definition", "a-1", "strategy-a", "A", "x".repeat(80)));
+        knowledge.add(knowledgeEntry("steps", "a-2", "strategy-a", "A", "x".repeat(80)));
+
+        // 单策略超预算也必须保留：空上下文会让模型编造。
+        RecommendationService.BudgetedKnowledge budgeted = RecommendationService.trimToBudget(knowledge, 100);
+
+        assertEquals(2, budgeted.knowledge().size());
+        assertEquals(0, budgeted.droppedChunks());
+    }
+
+    @Test
+    void budgetLeavesKnowledgeUntouchedWhenWithinLimit() {
+        JsonArray knowledge = new JsonArray();
+        knowledge.add(knowledgeEntry("definition", "a-1", "strategy-a", "A", "短内容"));
+        knowledge.add(knowledgeEntry("definition", "b-1", "strategy-b", "B", "也短"));
+
+        RecommendationService.BudgetedKnowledge budgeted = RecommendationService.trimToBudget(knowledge, 100);
+
+        assertEquals(2, budgeted.knowledge().size());
+        assertEquals(0, budgeted.droppedChunks());
+        assertEquals("a-1", budgeted.knowledge().get(0).getAsJsonObject().get("chunkId").getAsString());
+    }
+
+    @Test
+    void budgetGroupsScatteredChunksByStrategy() {
+        JsonArray knowledge = new JsonArray();
+        knowledge.add(knowledgeEntry("definition", "a-1", "strategy-a", "A", "x".repeat(40)));
+        knowledge.add(knowledgeEntry("definition", "b-1", "strategy-b", "B", "x".repeat(40)));
+        knowledge.add(knowledgeEntry("steps", "a-2", "strategy-a", "A", "x".repeat(40)));
+        knowledge.add(knowledgeEntry("steps", "b-2", "strategy-b", "B", "x".repeat(60)));
+
+        // 命中与补齐会让同一策略的 chunk 分散：按首次出现顺序聚合后，B 组 100 字符仍超限，
+        // 整组一起裁——b-1 与 b-2 不因位置分散而被拆散。
+        RecommendationService.BudgetedKnowledge budgeted = RecommendationService.trimToBudget(knowledge, 100);
+
+        assertEquals(2, budgeted.knowledge().size());
+        assertEquals("a-2", budgeted.knowledge().get(1).getAsJsonObject().get("chunkId").getAsString());
+        assertEquals(2, budgeted.droppedChunks());
+    }
+
     private static JsonObject knowledgeEntry(String chunkType, String chunkId, String strategyId,
                                              String strategyName, String text) {
         JsonObject item = new JsonObject();
