@@ -32,7 +32,7 @@
 - `users`：用户身份标识。
 - `conversations`：一次连续对话。
 - `messages`：用户和助手的原始消息及消息元数据。推荐结果以快照形式序列化进 `metadata_json`，因此方法后来被降权归档也不影响历史页回看。
-- `user_profiles`：当前结构化画像和完整度。
+- `user_profiles`：当前结构化画像和完整度。V11 起 `profile_json` 是三层结构——共享层 `shared` + 目标情境数组 `episodes[]` + `activeEpisodeId`；`conversations.episode_id`（V11 加、可空）把每次会话绑定到某个情境，历史会话为 NULL 时按默认情境处理。
 - `recommendation_feedback`：卡片上的 👍，只汇总给投稿者看，不参与推荐度计算。
 - `method_trial_feedback`：尝试后反馈，驱动升降权的**唯一**信号。
 - `model_call_logs`：模型决策日志，含输入输出快照、耗时与 token 用量，写入前脱敏，按保留期自动清理。
@@ -66,17 +66,14 @@ Qdrant 不负责保存完整用户会话，也不替代 PostgreSQL。
 
 从当前用户消息中提取明确表达的结构化信息，不负责判断是否已经足够推荐，也不直接写数据库。
 
-当前字段包括：
+抽取的字段分两组（`EpisodeProfile` 定义、两组不相交）：
 
-- `learningGoal`
-- `learningContent`
-- `mainDifficulty`
-- `availableMinutesPerDay`
-- `daysUntilDeadline`
-- `preferredLearningStyle`
-- `triedMethods`
+- **共享层 `shared`**（换个学习目标也带得走，是人的偏好与作息）：`preferredLearningStyle`、`availableMinutesPerDay`。
+- **情境层 `episodes[]`**（随目标情境变化，数学的困难和英语的困难不是一回事）：`learningGoal`、`learningContent`、`mainDifficulty`、`daysUntilDeadline`、`triedMethods`。
 
 每个字段需要包含值、来源类型、置信度和原文证据。
+
+抽取器每轮除字段外还输出 `episodeDecision`：判断这条消息是「继续」某个已有情境（`action=continue` + `episodeId`）还是「开新」（`action=new` + 不超过 12 字的中文 `label`）。规则：拿不准优先 `continue` 防碎片化、同一学科下不同任务算不同情境、已有情境清单为空时一律 `new`。输入里的 `existingEpisodes`（id/label/goal/content）由 `EpisodeProfile.episodeSummaries` 从当前活跃情境生成；决策的实际落地见《画像校验与合并》。
 
 ### 画像校验与合并
 
@@ -87,6 +84,8 @@ Java 负责不可交给 Prompt 单独保证的硬边界：
 - 证据是否确实存在于当前消息。
 - 来源类型是否合法。
 - 不合法更新拒绝写入画像。
+
+合并由 `UserProfileMerger` 承担，并落地抽取器给出的 `episodeDecision`：`continue` 找到对应情境（`episodeId` 无效则退回当前活跃情境、不新建），`new` 先按 label 复用同名活跃情境、再复用空情境、都没有才新建，随后 `enforceActiveLimit` 把活跃情境压在 5 个以内（超限按 `updatedAt` 从旧到新归档，绝不归档本轮刚用到的情境）。画像形态因此从「一人一份扁平字段」升级为「共享层 `shared` + 目标情境 `episodes[]` + `activeEpisodeId`」三层（V11 迁移只加 `conversations.episode_id`，结构升级与向后兼容全在应用层）：`EpisodeProfile.normalize` 把任意形态归一成三层，库里 9 份老扁平画像读进来自动包成一个默认情境、一份不丢；`flattenedActiveView` 产出 `shared` + 当前情境合并的扁平视图，供 `UserProfileService` 下游的 readiness / decider / recommend 继续按旧形状消费、无需感知情境结构；每轮结束把 `activeEpisodeId` 写回 `conversations.episode_id`。
 
 未来合并逻辑需要保存画像历史，而不是只覆盖旧值。
 
@@ -325,7 +324,7 @@ Embedding 模型只负责把文本转换为向量。未来的用户画像模型�
 
 两个比率的分子分母量级必须一致：`method_trial_feedback` 有 `UNIQUE (user_id, strategy_id)`，反馈数天然是去重后的方法数，所以跟进率的分母用“被推荐过的不同方法数”而不是推荐消息数——一条消息里通常有好几个方法，拿消息数当分母会让“率”超过 1。这类错误不会报错，只会静默地产出一个看似合理的脏指标。
 
-用户可以查看画像，但**不提供直接编辑或更正字段的入口**。理由是产品的核心策略为“信用户的话只信一半”：用户可能对自己的定位不清晰，画像应由模型基于行为与多轮对话逐步引出；开放手动编辑等于完全采信用户自述，与该策略直接冲突。据此取消 roadmap 阶段 5 中“允许用户更正画像信息”一项。注意这与来源层级不矛盾：模型推测经用户确认是允许的，用户不能直接改写字段值。
+用户可以查看画像（`GET .../profile` 返回 `normalize` 后的三层结构 `shared` + `episodes[]` + `activeEpisodeId`），但**不提供直接编辑或更正字段的入口**。理由是产品的核心策略为“信用户的话只信一半”：用户可能对自己的定位不清晰，画像应由模型基于行为与多轮对话逐步引出；开放手动编辑等于完全采信用户自述，与该策略直接冲突。据此取消 roadmap 阶段 5 中“允许用户更正画像信息”一项。注意这与来源层级不矛盾：模型推测经用户确认是允许的，用户不能直接改写字段值。
 
 ## 模型边界与替换方式
 
@@ -347,7 +346,7 @@ Embedding 模型只负责把文本转换为向量。未来的用户画像模型�
 建议 Spring Boot 层逐步形成以下服务：
 
 - `ConversationService`：会话与消息生命周期。（未拆分，目前在 `UserProfileService` 与三个 Repository 里）
-- `UserProfileService`：抽取、校验、合并和画像历史。（已存在，历史版本未做）
+- `UserProfileService`：抽取、校验、合并（含 episode 归一化与情境归属，实际由 `UserProfileMerger` + `EpisodeProfile` 承担）和画像历史。（已存在，历史版本未做）
 - `ProfileDialogueService`：充分性判断、冲突确认和追问。（未拆分，目前是 `ConversationalProfileAgent` + `ProfileDecisionValidator` + `ProfileReadinessPolicy`）
 - `StrategyRetrievalService`：Embedding、Qdrant 召回和过滤。（未拆分，目前在 `RecommendationService` 里）
 - `RecommendationService`：排序、答案生成、引用和结果保存。（已存在，排序未做）
@@ -370,5 +369,5 @@ Web 前端只调用后端 API，不直接访问 SiliconFlow、Qdrant 或 Postgre
 - 行为观测采集范围小于使用范围（只存不喂模型），且采集失败一律只打印不抛出，任何情况下不能让对话或反馈提交失败。
 - 用户应能知道画像用于什么，并能查看或删除自己的画像数据。删除属隐私权利，与“不提供字段编辑入口”不冲突。删除入口尚未实现；目前只有数据库层的 `ON DELETE CASCADE` 保证删用户会带走它的会话、消息、画像、反馈与观测。
 - 保存模型版本、决定结果、置信度、回退原因和耗时，方便评测与排错。Prompt 版本尚未入库，目前只能从代码里的常量反推，这让“换个 Prompt 后质量变了吗”无法回答。
-- 对超时、限流、JSON 不合法和数据库失败分别处理，不能把技术故障伪装成用户信息不足。推荐链路超时确实会发生：`RecommendationChatClient` 的 `readTimeout` 是 90 秒，同一条链路 2026-09-10 用了 23.2 秒（prompt 3427 / completion 845），2026-09-11 用了 83.9 秒（prompt 3410 / completion 893），早期探针还出现过一次 90.5 秒真超时。V8 起三个 token 计数入库，这构成了一组同负载对照：输入差 0.5%、输出差 5.7%、耗时差 3.6 倍，变量只剩服务端生成速率（实测 10-36 token/秒，两天的同批 `extract`/`decide` 各自内部速率一致）。结合输入更大的那次反而更快，可以定下：耗时几乎全由 completion 决定而数千 token 的输入贡献不到一秒。因此超时风险是“输出上限乘以服务端速率波动”而不是知识负载过大；按实测下限算 `max_tokens=1400` 需要 140 秒，单靠调阈值补不回来。超时被归为 `failed` 并记下 `error_message`，画像对话流程不受影响。
+- 对超时、限流、JSON 不合法和数据库失败分别处理，不能把技术故障伪装成用户信息不足。推荐链路超时确实会发生，对策已在公网部署阶段落地：`RecommendationChatClient` 的 `readTimeout` 现为 60 秒（曾是 90 秒），同一条链路 2026-09-10 用了 23.2 秒（prompt 3427 / completion 845），2026-09-11 用了 83.9 秒（prompt 3410 / completion 893），早期探针还出现过一次 90.5 秒真超时。V8 起三个 token 计数入库，这构成了一组同负载对照：输入差 0.5%、输出差 5.7%、耗时差 3.6 倍，变量只剩服务端生成速率（实测 10-36 token/秒，两天的同批 `extract`/`decide` 各自内部速率一致）。结合输入更大的那次反而更快，可以定下：耗时几乎全由 completion 决定而数千 token 的输入贡献不到一秒。因此超时风险是“输出上限乘以服务端速率波动”而不是知识负载过大——按实测下限算，旧的 `max_tokens=1400` 需要 140 秒，单靠调阈值补不回来。既然波动不可控，就不追阈值，改为压缩输出 + 快速失败（已在公网部署阶段落地）：`max_tokens` 压到 1200、`readTimeout` 收到 60 秒、配合关闭思维链（省掉 SiliconFlow 结构化模式 17~24 秒的固定惩罚），正常路径约 19 秒，抖动时宁可快速失败走兜底，也不让串行请求挂过 Cloudflare 免费隧道的 100 秒硬上限。超时被归为 `failed` 并记下 `error_message`，画像对话流程不受影响。
 - 同一原则也适用于静默截断：推荐时把命中策略的全部 chunk 补齐（`QdrantClient.findByStrategyIds`）曾固定只取第一页 100 个，超出部分无错误无日志地丢掉，模型会拿着半个策略的资料给出看上去完全正常的推荐。现在分页取回并设上限 200，命中总数与实际取回数的差值记在 `model_call_logs` 的 `knowledgeDropped`，与已有的 `gateFilteredOut` 并列：推荐质量下降时能区分“闸门挡的”“预算截断的”与“知识库本来就薄”。
