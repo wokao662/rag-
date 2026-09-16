@@ -23,7 +23,7 @@ import java.util.concurrent.TimeUnit;
 /** 命令行测试：用户问题 -> Qdrant 检索 -> 聊天模型生成结构化学习策略推荐。 */
 public final class RagRecommendationTest {
     private static final String CHAT_URL = "https://api.siliconflow.cn/v1/chat/completions";
-    private static final String CHAT_MODEL = "Qwen/Qwen3-32B";
+    private static final String CHAT_MODEL = "zai-org/GLM-5.2";
     private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 

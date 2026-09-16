@@ -21,7 +21,11 @@ import java.util.concurrent.TimeUnit;
 /** 使用聊天模型从用户原话中抽取结构化画像候选；不直接写数据库。 */
 public final class UserProfileExtractor implements AutoCloseable {
     private static final String API_URL = "https://api.siliconflow.cn/v1/chat/completions";
-    public static final String MODEL = "Qwen/Qwen3-32B";
+    // 模型选择（2026-09-16 换型）：抽取是短结构化输出（~50-200 token），原 Qwen/Qwen3-32B 在
+    // SiliconFlow 上排队尖峰严重（8 token 请求实测 28s~185s，频繁击穿 30s 读超时）。
+    // DeepSeek-V4-Flash 同负载实测 1.3s、JSON 干净且 evidence 逐字完整；
+    // 注意它在长文生成场景很慢（~845 token 需 75s），不适合本路以外的用途。
+    public static final String MODEL = "deepseek-ai/DeepSeek-V4-Flash";
     private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final String SYSTEM_PROMPT = """
