@@ -39,7 +39,7 @@
    INSERT INTO access_codes (code, label, role) VALUES ('TEST-XXXX', '测试者A', 'tester');
    ```
    `role` 取 `tester` / `reviewer`（reviewer 额外解锁审核入口）。
-2. **对话流**：输入一条真实的学习困惑 → 完成画像对话 → 触发推荐；推荐卡片应出现"研究依据"区块，DOI 链接可点开。
+2. **对话流（含流式渲染）**：输入一条真实的学习困惑 → 完成画像对话 → 触发推荐；推荐卡片应出现"研究依据"区块，DOI 链接可点开。等待期间应看到阶段文案轮换（"正在理解你的情况…"→"正在想怎么回复你…"→"正在检索合适的学习策略…"），回复**逐字渐现**而非整段一次性出现——若长时间空白后整段跳出，说明流式链路被中间层缓冲。公网实测参考：ask 轮约 7 秒出首字、10 秒完成；推荐轮约 25 秒出首字、37 秒完成（2026-09-16，Cloudflare 隧道无缓冲已验证）。
 3. **服务端抽查**：
    ```powershell
    docker exec rag-postgres psql -U learning_app -d learning_app -c "SELECT created_at, status, error_message FROM model_call_logs WHERE task_type='recommend' ORDER BY created_at DESC LIMIT 10;"

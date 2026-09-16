@@ -264,6 +264,12 @@ Invoke-RestMethod `
   -Body $body
 ```
 
+也可以流式发送：同一路径加 `/stream` 后缀（`POST .../messages/stream`），回复以 SSE（`text/event-stream`）边生成边推送，事件依次为 `stage`（当前处理阶段：`extract` / `decide` / `recommend`）、`delta`（增量文字）、`final`（完整结果，`data` 与非流式响应体完全同构）、`error`。Web 界面默认走这条路径逐字渲染；脚本场景想要一次性 JSON 就继续用上面的非流式接口。
+
+```powershell
+curl.exe -N -H "Content-Type: application/json" --data-binary "@message.json" "http://127.0.0.1:8080/api/v1/users/web-user-001/conversations/$($conversation.conversationId)/messages/stream"
+```
+
 查询当前画像：
 
 ```powershell
