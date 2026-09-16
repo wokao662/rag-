@@ -48,6 +48,9 @@ services:
       DB_MAX_POOL_SIZE: ${DB_MAX_POOL_SIZE:-10}
       DB_MIN_IDLE: ${DB_MIN_IDLE:-2}
       DB_CONNECTION_TIMEOUT_MS: ${DB_CONNECTION_TIMEOUT_MS:-30000}
+      # 审核闸门：本地默认 false；公网重新上线时在 .env 置 true，
+      # 让“只推 approved + 曝光人数上限”两条生效（README《推荐闸门与渐进投放》）。
+      GOVERNANCE_REVIEW_GATE: ${GOVERNANCE_REVIEW_GATE:-false}
     ports:
       - "127.0.0.1:8080:8080"
 
