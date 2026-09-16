@@ -21,7 +21,9 @@ import java.util.concurrent.TimeUnit;
 /** 根据当前画像和对话上下文，动态判断是继续追问还是进入推荐。 */
 public final class ConversationalProfileAgent implements AutoCloseable {
     private static final String API_URL = "https://api.siliconflow.cn/v1/chat/completions";
-    public static final String MODEL = "Qwen/Qwen3-32B";
+    // 模型选择（2026-09-16 换型）：决策回复面向用户（~110-130 token 中文），
+    // 换 GLM-5.2 兼顾质量与稳定（原 Qwen/Qwen3-32B 排队尖峰 28s~185s，是"回得慢"主因）。
+    public static final String MODEL = "zai-org/GLM-5.2";
     private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
     private static final Gson GSON = new GsonBuilder().create();
     private static final String SYSTEM_PROMPT = """

@@ -19,7 +19,10 @@ import java.util.concurrent.TimeUnit;
 /** 调用聊天模型，基于检索到的策略 chunk 为当前画像生成结构化推荐；不直接写数据库。 */
 public final class RecommendationChatClient implements AutoCloseable {
     private static final String API_URL = "https://api.siliconflow.cn/v1/chat/completions";
-    public static final String MODEL = "Qwen/Qwen3-32B";
+    // 模型选择（2026-09-16 换型）：本路是长结构化输出（~800-900 token），
+    // GLM-5.2 实测 813 token / 15.3s 稳定完成；原 Qwen/Qwen3-32B 健康时相近，
+    // 但排队尖峰 30~185s 频繁击穿 60s 读超时；DeepSeek-V4-Flash 长输出反而很慢（845 token / 75s），不适用本路。
+    public static final String MODEL = "zai-org/GLM-5.2";
     private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
     private static final Gson GSON = new Gson();
     private static final String SYSTEM_PROMPT = """
