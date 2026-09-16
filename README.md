@@ -58,7 +58,7 @@ mvn compile exec:java "-Dexec.mainClass=com.example.rag.cli.DocumentExtractor" "
 
 ## 从策略档案生成最终 Chunk
 
-`generate_strategy_chunks.py` 读取 `data/strategies/*.json`，将策略的定义、每个实施步骤、每个适用条件和每个不适用条件分别生成可检索的 JSONL Chunk。
+`generate_strategy_chunks.py` 读取 `data/strategies/*.json`，将策略的定义、每个实施步骤、每个适用条件、每个不适用条件以及每条研究证据分别生成可检索的 JSONL Chunk（五类：`definition` / `procedure` / `suitable_condition` / `unsuitable_condition` / `evidence`；`evidence` 由 V12 迁移放开，带可点开的 DOI 出处）。
 
 ```powershell
 python .\generate_strategy_chunks.py
@@ -365,7 +365,7 @@ mvn compile exec:java "-Dexec.mainClass=com.example.rag.cli.StrategyImporter" "-
 | `review_status != 'approved'` | 不生效 | 生效 |
 | 曝光人数达到当前档位上限 | 不生效 | 生效 |
 
-默认关闭是因为现存 13 个策略档案全是 `draft`，直接开启会把推荐过滤成全空。但前三条拦截与审核无关，所以飞轮在人工审核完成之前就开始转：无溯源的和已被真实反馈证伪的照样挡下，曝光计数、社区分与合成总分照常累计。审核完成、把通过的策略置为 `approved` 之后改成 `true`。
+默认关闭在首批人工审核完成前是不得已（当时 13 个策略全是 `draft`，直接开启会把推荐过滤成全空）；审核完成后（2026-09-12，11 条 `approved` + 2 条背景知识 `rejected`+`paused`）本地仍保持 `false` 是有意的——那 2 条由 `paused` 与此开关无关地永久挡下，开不开结果相同。前三条拦截与审核无关，飞轮一直在转：无溯源的和已被真实反馈证伪的照样挡下，曝光计数、社区分与合成总分照常累计。上线公网时改成 `true`，让“只推 approved + 曝光人数上限”两条生效。
 
 闸门查询失败时保守处理：挡下全部候选（宁可这次不推荐，也不能把未审核内容当作已审核推给用户）。曝光记录失败则不阻断推荐——推荐已经生成，不能因为记账写不进去就把它丢掉，计数偏差下一次推荐就会补上。两条路径都会打完整异常栈：外层包装只有一句“数据库操作失败”，真正的 SQL 错误在 `cause` 里。
 
@@ -444,7 +444,7 @@ POST /api/v1/auth/redeem
 
 码不存在或已 `revoked` 返回 401（`revoked` 的 `reviewer` 码同样被拒，角色不绕过停用）；兑换成功会创建用户并更新 `last_used_at`。
 
-这是 `role` 目前唯一的消费点：**审核类端点尚未实现，所以 `reviewer` 只告知身份、不拦截任何请求**。等审核端点落地时，强制点应放在端点上（校验兑换者的角色），而不是塞进 `AccessCodeFilter`——那个过滤器只判断 `X-Access-Code` 与路径中的用户标识是否一致，与角色无关，混进去会让两件事都变难查。
+`role` 的消费点是审核端点（V10 已落地，详见 `docs/architecture.md` 的《人工审核端点》）：`GET .../reviews/pending`（待审队列）与 `POST .../reviews/{strategyId}/decision`（落审核决定）由服务层 `AccessCodeService.requireReviewer` 强制校验角色，非 `reviewer` 返回 403。强制点放在服务层而不是塞进 `AccessCodeFilter`——那个过滤器只判断 `X-Access-Code` 与路径中的用户标识是否一致，与角色无关，混进去会让两件事都变难查。首批 13 条策略已于 2026-09-12 审核完成（11 `approved` + 2 `rejected`+`paused`）。
 
 ### 模型调用日志
 
@@ -475,7 +475,7 @@ docker exec rag-postgres psql -U learning_app -d learning_app -c "SELECT task_ty
 | 09-10 | 3427 | 845 | 23.2 秒 | 36.4 token/秒 |
 | 09-11 | 3410 | 893 | 83.9 秒 | 10.6 token/秒 |
 
-输入差 0.5%、输出差 5.7%，而耗时差 3.6 倍——**变量只剩服务端生成速率**，这不再需要从“`decide` 比 `extract` 快”间接推断。同批的 `extract`（207 token / 19.9 秒）与 `decide`（101 token / 10.2 秒）也都是约 10 token/秒，说明是服务端整体变慢而不是单次抖动。速率实测区间因此从 16–36 扩到 **10–36 token/秒**，而 83.9 秒距 `readTimeout` 的 90 秒只剩 6 秒：超时不是理论风险，是已经踩到的线。真正的风险是**输出上限乘以速率波动**（`max_tokens=1400` ÷ 10 token/秒 = 140 秒，远超阈值），而这两个量都不在本项目控制范围内。
+输入差 0.5%、输出差 5.7%，而耗时差 3.6 倍——**变量只剩服务端生成速率**，这不再需要从“`decide` 比 `extract` 快”间接推断。同批的 `extract`（207 token / 19.9 秒）与 `decide`（101 token / 10.2 秒）也都是约 10 token/秒，说明是服务端整体变慢而不是单次抖动。速率实测区间因此从 16–36 扩到 **10–36 token/秒**，而 83.9 秒当时已逼近 `readTimeout` 的旧阈值 90 秒（早期探针还出现过一次 90.5 秒真超时）：超时不是理论风险，是已经踩到的线。**对策已在公网部署阶段落地**——不追阈值，改为压缩输出 + 快速失败：`max_tokens` 从 1400 压到 1200、`readTimeout` 收到 60 秒、配合关闭思维链（省掉 SiliconFlow 结构化模式 17~24 秒的固定惩罚），抖动时宁可快速失败走兜底，也不让串行请求挂过 Cloudflare 免费隧道的 100 秒硬上限；正常路径回到约 19 秒。
 
 #### 写入前脱敏
 
