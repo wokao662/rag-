@@ -23,6 +23,8 @@
 
 模型调用日志在写入前脱敏。行为观测只采集不使用，不进入任何模型输入（见《用户画像的数据层级》与《安全、隐私与可观察性》）。
 
+以上流程整轮串行执行，用户在两次模型调用加一次推荐生成期间只能看到“正在输入”。2026-09-16 起新增 SSE 流式端点，把追问回复与推荐正文边生成边推给前端；流式与非流式共用同一条管线，不是第二份实现（见《流式回复通道》）。
+
 ## 数据存储职责
 
 ### PostgreSQL
@@ -210,6 +212,22 @@ Embedding 模型只负责把文本转换为向量。未来的用户画像模型�
 仍然缺的：`overall_score` 已落库但**未参与排序**；审核**界面**未做（端点已可用，界面是独立任务，它只需要读 `redeem` 返回的 `role` 决定是否展示入口）。
 
 此前本节曾建议 `predictedBaseScore`/`editorScore`/`feedbackScore`/`rankingScore` 四分体系，与数据实际字段不一致且未落地。四分体系并非错误，但它描述的职责已由上表承担；保留两套只会造成写入者不清。本节以数据库实际列为准。
+
+## 流式回复通道（SSE）
+
+整轮对话是串行的：抽取 → 决策 →（必要时）推荐生成，两个模型调用加一次推荐生成，用户在整段时间里只能看到“正在输入”。2026-09-16 起新增流式端点，把追问回复与推荐正文边生成边推给前端：
+
+- 端点：`POST /api/v1/users/{externalId}/conversations/{conversationId}/messages/stream`，`text/event-stream`。不用 `EventSource`（它只支持 GET、无法携带请求体），前端用 `fetch` + `ReadableStream` 手工解析 SSE 帧。
+- 事件协议：`stage`（`extract` / `decide` / `recommend`，供前端显示当前阶段文案）、`delta`（增量文本）、`final`（与非流式端点完全同构的 `TurnResult`）、`error`（文案与 `ApiExceptionHandler` 逐条对齐，不把技术故障伪装成“正在处理”）。**`final` 是权威渲染源**：前端把逐字显示的临时文本替换为 `final` 里的 `recommendation.answer` / `assistantMessage`，再渲染推荐卡片——流式只是渐进呈现，结果以最终事件为准。
+- 非流式端点（`/messages`）保留且与流式共用同一条管线：`UserProfileService` 把 `loadTurnContext` / `extractAndMerge` / `finishTurn` 拆成三段共用，`RecommendationService` 用 `ChatGenerator` 函数接口让整块与流式走同一个 `recommendInternal`。流式不是第二条实现，是一条实现的两个出口。
+
+增量文本的提取：模型输出的是整段 JSON（`nextQuestion` / `answer` 字段的文本混在键名与转义里），`JsonFieldStreamExtractor` 每次喂入“全量累积文本”重扫、只返回新增的解码值，因此对任意块边界免疫（转义序列被切两半也能恢复）；`ChatStreamReader` 负责读 SSE 行、累积 content、逐块覆盖 usage、记录 `finish_reason`、跳过脏块、`[DONE]` 停止。SiliconFlow 实测每个 chunk 都带 usage（渐进值、末块终值），流式路径的 `model_call_logs` 埋点与非流式同源，token 用量照常入库。
+
+**prompt 输出字段顺序会直接决定首个 delta 的时点**：`nextQuestion` 原本是决策 JSON 的最后一个字段，追问要等整段生成到末期才逐字出现。把该字段移到 `confidence` 之后后，ask 轮「decide 开始 → 首个 delta」从 5.10 秒提前到 1.34 秒（2026-09-16 实测，同模型 GLM-5.2）。整段 JSON 的字段排放顺序因此成为流式体验的可调参数，改 prompt 结构时需一并考虑。
+
+服务端实现要点：`SseEmitter` 超时 120 秒（Cloudflare 免费隧道 100 秒硬上限之上留余量）；该轮处理跑在独立 daemon 线程池（8 线程）里，不占用请求线程；客户端断开时事件静默作废，但处理线程照常把该轮落库——断连只影响观看，不影响数据。
+
+2026-09-16 端到端实测（本地容器）：ask 轮 0.24s extract → 2.12s decide → 3.46s 首个 delta → 5.79s final；推荐轮 7.93s 首段 `answer` 文字、30.6s final（含 2 条策略推荐卡与 14 条引用）；三路 `model_call_logs` 的 prompt / completion / total token 全部采集。
 
 ## 用户投稿与渐进投放
 

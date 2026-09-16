@@ -1,5 +1,7 @@
 package com.example.rag.profile;
 
+import com.example.rag.llm.ChatStreamReader;
+import com.example.rag.llm.JsonFieldStreamExtractor;
 import com.example.rag.llm.ModelJson;
 import com.example.rag.observability.ModelReply;
 import com.example.rag.observability.TokenUsage;
@@ -17,6 +19,7 @@ import okhttp3.Response;
 import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 /** 根据当前画像和对话上下文，动态判断是继续追问还是进入推荐。 */
 public final class ConversationalProfileAgent implements AutoCloseable {
@@ -60,10 +63,10 @@ public final class ConversationalProfileAgent implements AutoCloseable {
               "action": "ask 或 recommend",
               "ready": true或false,
               "confidence": 0到1,
+              "nextQuestion": "ask 时：上面要求的那段有温度的回复（接住用户+可选小提示+末尾一个问题）；recommend 时为空字符串",
               "reason": "判断依据",
               "missingInformation": ["仍然重要的未知信息"],
-              "conflicts": ["需要用户确认的冲突"],
-              "nextQuestion": "ask 时：上面要求的那段有温度的回复（接住用户+可选小提示+末尾一个问题）；recommend 时为空字符串"
+              "conflicts": ["需要用户确认的冲突"]
             }
             """;
 
@@ -83,29 +86,8 @@ public final class ConversationalProfileAgent implements AutoCloseable {
             JsonObject profile,
             List<MessageRepository.StoredMessage> recentMessages
     ) throws IOException {
-        JsonObject context = new JsonObject();
-        context.add("profile", profile == null ? new JsonObject() : profile);
-        JsonArray history = new JsonArray();
-        recentMessages.forEach(stored -> {
-            JsonObject message = new JsonObject();
-            message.addProperty("role", stored.role());
-            message.addProperty("content", stored.content());
-            history.add(message);
-        });
-        context.add("recentMessages", history);
-
-        JsonObject body = new JsonObject();
-        body.addProperty("model", MODEL);
-        body.addProperty("temperature", 0.5);
-        body.addProperty("max_tokens", 800);
+        JsonObject body = decideBody(profile, recentMessages);
         body.addProperty("stream", false);
-        // 关思维链 + 不用 response_format:json_object：实测该结构化模式在 SiliconFlow 上
-        // 会劣化到 17~40 秒击穿 30 秒读超时，去掉后靠 system prompt 约束 + ModelJson 兜底解析。
-        body.addProperty("enable_thinking", false);
-        JsonArray messages = new JsonArray();
-        messages.add(message("system", SYSTEM_PROMPT));
-        messages.add(message("user", "请根据以下画像和最近对话决定下一步：\n" + GSON.toJson(context)));
-        body.add("messages", messages);
 
         Request request = new Request.Builder()
                 .url(API_URL)
@@ -130,6 +112,73 @@ public final class ConversationalProfileAgent implements AutoCloseable {
                 throw new IOException("画像 Agent 返回内容未通过格式校验", error);
             }
         }
+    }
+
+    /**
+     * decide 的流式版本：nextQuestion 字段的增量文本在生成过程中就交给 onReplyDelta，
+     * 用户在整段 JSON 完成前先看到回复逐字出现。校验与 decide 完全同源，失败抛相同的
+     * IOException，调用方的兜底逻辑不需要区分两种形态。
+     */
+    public ModelReply<ProfileDecisionValidator.Decision> decideStream(
+            JsonObject profile,
+            List<MessageRepository.StoredMessage> recentMessages,
+            Consumer<String> onReplyDelta
+    ) throws IOException {
+        JsonObject body = decideBody(profile, recentMessages);
+        body.addProperty("stream", true);
+        JsonObject streamOptions = new JsonObject();
+        streamOptions.addProperty("include_usage", true);
+        body.add("stream_options", streamOptions);
+
+        Request request = new Request.Builder()
+                .url(API_URL)
+                .header("Authorization", "Bearer " + apiKey)
+                .post(RequestBody.create(body.toString(), JSON))
+                .build();
+        try (Response response = client.newCall(request).execute()) {
+            if (!response.isSuccessful()) {
+                String responseBody = response.body() == null ? "" : response.body().string();
+                throw new IOException("画像 Agent 请求失败 (HTTP " + response.code() + "): " + responseBody);
+            }
+            JsonFieldStreamExtractor extractor = new JsonFieldStreamExtractor("nextQuestion");
+            ChatStreamReader.StreamResult stream = ChatStreamReader.read(response, accumulated -> {
+                String delta = extractor.accept(accumulated);
+                if (!delta.isEmpty()) onReplyDelta.accept(delta);
+            });
+            try {
+                return new ModelReply<>(
+                        validator.validate(ModelJson.parseObject(stream.content())), stream.usage());
+            } catch (RuntimeException error) {
+                throw new IOException("画像 Agent 返回内容未通过格式校验", error);
+            }
+        }
+    }
+
+    /** stream 开关由两个入口各自补上：非流式路径的行为不因本次改动而变。 */
+    private JsonObject decideBody(JsonObject profile, List<MessageRepository.StoredMessage> recentMessages) {
+        JsonObject context = new JsonObject();
+        context.add("profile", profile == null ? new JsonObject() : profile);
+        JsonArray history = new JsonArray();
+        recentMessages.forEach(stored -> {
+            JsonObject message = new JsonObject();
+            message.addProperty("role", stored.role());
+            message.addProperty("content", stored.content());
+            history.add(message);
+        });
+        context.add("recentMessages", history);
+
+        JsonObject body = new JsonObject();
+        body.addProperty("model", MODEL);
+        body.addProperty("temperature", 0.5);
+        body.addProperty("max_tokens", 800);
+        // 关思维链 + 不用 response_format:json_object：实测该结构化模式在 SiliconFlow 上
+        // 会劣化到 17~40 秒击穿 30 秒读超时，去掉后靠 system prompt 约束 + ModelJson 兜底解析。
+        body.addProperty("enable_thinking", false);
+        JsonArray messages = new JsonArray();
+        messages.add(message("system", SYSTEM_PROMPT));
+        messages.add(message("user", "请根据以下画像和最近对话决定下一步：\n" + GSON.toJson(context)));
+        body.add("messages", messages);
+        return body;
     }
 
     private static JsonObject message(String role, String content) {

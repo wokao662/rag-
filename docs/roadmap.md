@@ -36,6 +36,7 @@
 - 首批人工审核完成（2026-09-12，审核人 wokao）：13 条策略逐条终审判定，11 条 `approved`（`reviewer_score` 齐全，作为适合人群预测模型的第一批训练标签），2 条背景分类知识 `rejected` 且 `exposure_state=paused`（`steps` 为空、非可执行方法）。开 `review-gate` 的前置已满足。
 - 知识库内容填厚（Path 2，迁移 V12）：11 条真方法从单句定义扩写成含实施步骤、近邻差异化定位与可点开 DOI 的研究证据；新增第五类 chunk `evidence`（V12 放开 `strategy_chunks_type_check`），把原本躺在档案里的 `evidence[]` 死字段变成可检索、带出处的 chunk。chunk 从 107 增至 131（其中 `evidence` 24 条），正文从约 4356 字符增至 10970 字符。
 - 情境化画像（episode，迁移 V11 + 应用层）：画像形态从「一人一份扁平字段」升级为「共享层 `shared` + 若干目标情境 `episodes[]` + `activeEpisodeId`」三层结构，让用户换个学习目标（上场聊数学、下场聊英语）不再被困在同一份画像里。`EpisodeProfile` 负责新旧结构归一化（库里 9 份老扁平画像读进来自动包成默认情境，一份不丢）、当前情境解析与给下游的扁平视图，`UserProfileExtractor` 判断每轮该「续哪个情境还是开新」，活跃情境上限 5、超限自动归档最旧；**新会话首条消息一律开新情境**（2026-09-16：首条消息对抽取器隐藏旧情境清单，让「新会话=新话题」成为服务端保证；延续旧话题时同名情境会被合并器复用接回）。**这是已落地的完整特性；`architecture.md` 画像章节已同步三层模型。**
+- **流式回复（SSE，2026-09-16）**：发送消息新增流式端点 `POST .../messages/stream`（`stage`/`delta`/`final`/`error` 四类事件），画像追问与推荐正文边生成边逐字显示，不再让用户干等完整轮次；`final` 携带与非流式同构的完整 `TurnResult` 做权威渲染（逐字文本只是临时呈现），非流式端点保留、两条路径共用同一管线（`loadTurnContext`/`extractAndMerge`/`finishTurn` 三段拆分 + `RecommendationService.ChatGenerator` 函数接口）。增量提取由 `JsonFieldStreamExtractor`（对任意块边界免疫）与 `ChatStreamReader` 承担，流式路径 usage 埋点与非流式同源。prompt 字段顺序调优：`nextQuestion` 移到决策 JSON 前部后，ask 轮「decide 开始 → 首 delta」从 5.1s 提前到 1.34s。端到端实测：ask 轮 5.79s final、推荐轮 30.6s final（推荐卡与引用完整）。
 
 ## 当前方案的临时性质
 
