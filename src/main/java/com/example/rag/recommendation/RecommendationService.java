@@ -77,7 +77,7 @@ public class RecommendationService {
         if (knowledge.size() == 0) {
             RecommendationResult empty = new RecommendationResult(
                     "no_match", "知识库中还没有可推荐的学习策略，请稍后再试。",
-                    queryText, List.of(), List.of(), List.of());
+                    queryText, List.of(), List.of(), List.of(), List.of());
             logCall(userId, conversationId, queryText, filteredOut, knowledgeDropped, outputOf(empty), start,
                     "success", null, null);
             return empty;
@@ -87,8 +87,12 @@ public class RecommendationService {
         try {
             reply = chatClient.generate(profile, queryText, knowledge);
         } catch (IOException error) {
+            // 内容解析失败时 token 已经花掉了：MalformedOutputException 自带用量，照记不丢。
+            // 其余失败（HTTP 错误、响应结构异常）确实没有可用的用量，维持 null。
+            TokenUsage usage = error instanceof RecommendationChatClient.MalformedOutputException malformed
+                    ? malformed.usage() : null;
             logCall(userId, conversationId, queryText, filteredOut, knowledgeDropped, null, start, "failed",
-                    error.getMessage(), null);
+                    error.getMessage(), usage);
             throw new RecommendationUnavailableException("推荐生成服务暂时不可用", error);
         }
         JsonObject raw = reply.content();
@@ -104,7 +108,8 @@ public class RecommendationService {
             throw new RecommendationUnavailableException("推荐结果未通过格式校验", error);
         }
         RecommendationResult result = new RecommendationResult(output.status(), output.answer(), queryText,
-                output.userConstraints(), output.recommendations(), output.followUpQuestions());
+                output.userConstraints(), output.recommendations(), output.followUpQuestions(),
+                evidenceSources(knowledge, output.recommendations()));
         logCall(userId, conversationId, queryText, filteredOut, knowledgeDropped, outputOf(result), start,
                 "success", null, reply.usage());
         recordExposure(userId, result.recommendations());
@@ -249,6 +254,12 @@ public class RecommendationService {
         item.addProperty("chunkType", payload.get("chunkType").getAsString());
         item.addProperty("content", sanitize(payload.get("text").getAsString()));
         item.add("sourceIds", payload.get("sourceIds").deepCopy());
+        // evidenceUrl 只有证据 chunk 才有。URL 走 payload 而不是解析 content：
+        // content 会被 sanitize 截断，payload 始终完整。
+        JsonElement evidenceUrl = payload.get("evidenceUrl");
+        if (evidenceUrl != null && !evidenceUrl.isJsonNull()) {
+            item.addProperty("evidenceUrl", evidenceUrl.getAsString());
+        }
         return item;
     }
 
@@ -265,13 +276,80 @@ public class RecommendationService {
         return ids;
     }
 
+    /**
+     * 从知识集里提取被推荐策略的研究证据，供前端随卡片展示出处。
+     *
+     * <p>evidence chunk 的文本由生成器写死为「{策略名}的研究证据：{结论}（出处：{引用} {URL}）」，
+     * 这里按该格式拆出结论与文献引用；URL 一律取 payload 的 evidenceUrl，文本解析只作兜底。
+     */
+    static List<EvidenceSource> evidenceSources(
+            JsonArray knowledge, List<RecommendationValidator.Recommendation> recommendations) {
+        if (recommendations.isEmpty()) return List.of();
+        Set<String> recommended = new HashSet<>();
+        for (RecommendationValidator.Recommendation recommendation : recommendations) {
+            recommended.add(recommendation.strategyId());
+        }
+        List<EvidenceSource> sources = new ArrayList<>();
+        for (JsonElement element : knowledge) {
+            JsonObject item = element.getAsJsonObject();
+            if (!"evidence".equals(item.get("chunkType").getAsString())) continue;
+            String strategyId = item.get("strategyId").getAsString();
+            if (!recommended.contains(strategyId)) continue;
+            EvidenceSource source = parseEvidence(item);
+            if (source != null) sources.add(source);
+        }
+        return List.copyOf(sources);
+    }
+
+    /** 解析 evidence chunk；文本不合固定格式时返回 null，宁可不展示也不展示半截证据。 */
+    private static EvidenceSource parseEvidence(JsonObject item) {
+        String text = item.get("content").getAsString();
+        String prefix = item.get("strategyName").getAsString() + "的研究证据：";
+        int start = text.indexOf(prefix);
+        if (start < 0) return null;
+        String body = text.substring(start + prefix.length());
+        String url = item.has("evidenceUrl") ? item.get("evidenceUrl").getAsString() : "";
+        String claim;
+        String citation = "";
+        int sourceMark = body.lastIndexOf("（出处：");
+        if (sourceMark < 0) {
+            claim = body.trim();
+        } else {
+            claim = body.substring(0, sourceMark).trim();
+            String tail = body.substring(sourceMark + "（出处：".length());
+            if (tail.endsWith("）")) tail = tail.substring(0, tail.length() - 1);
+            citation = tail.trim();
+            if (url.isEmpty()) {
+                int space = citation.lastIndexOf(' ');
+                if (space > 0 && citation.substring(space + 1).startsWith("http")) {
+                    url = citation.substring(space + 1);
+                    citation = citation.substring(0, space).trim();
+                }
+            } else if (citation.endsWith(url)) {
+                citation = citation.substring(0, citation.length() - url.length()).trim();
+            }
+        }
+        if (claim.isEmpty()) return null;
+        return new EvidenceSource(item.get("strategyId").getAsString(), claim, citation, url);
+    }
+
     public record RecommendationResult(
             String status,
             String answer,
             String queryText,
             List<String> userConstraints,
             List<RecommendationValidator.Recommendation> recommendations,
-            List<String> followUpQuestions
+            List<String> followUpQuestions,
+            List<EvidenceSource> evidenceSources
+    ) {
+    }
+
+    /** 一条研究证据：结论 + 文献引用 + 可点开的原文链接。 */
+    public record EvidenceSource(
+            String strategyId,
+            String claim,
+            String citation,
+            String url
     ) {
     }
 
