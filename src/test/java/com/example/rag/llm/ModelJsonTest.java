@@ -94,4 +94,37 @@ class ModelJsonTest {
         // 截断悬在“键刚写完、值还没写”的位置：悬空键与逗号一并剥掉。
         assertEquals(1, ModelJson.parseObject("{\"a\":1,\"b\":").get("a").getAsInt());
     }
+
+    @Test
+    void repairsTrailingCommasInObjectsAndArrays() {
+        // 完整但带尾随逗号的 JSON（LLM 高频形态）：对象与数组里的尾随逗号都要剥掉。
+        JsonObject result = ModelJson.parseObject("{\"a\":[1,2,],\"b\":{\"c\":\"x\",},}");
+        assertEquals(2, result.getAsJsonArray("a").size());
+        assertEquals(1, result.getAsJsonArray("a").get(0).getAsInt());
+        assertEquals(2, result.getAsJsonArray("a").get(1).getAsInt());
+        assertEquals("x", result.getAsJsonObject("b").get("c").getAsString());
+    }
+
+    @Test
+    void trailingCommaRepairKeepsCommasInsideStrings() {
+        // 字符串内部的逗号（含结尾逗号）不得被误剥。
+        JsonObject result = ModelJson.parseObject("{\"note\":\"a,b,\",\"n\":1,}");
+        assertEquals("a,b,", result.get("note").getAsString());
+        assertEquals(1, result.get("n").getAsInt());
+    }
+
+    @Test
+    void trailingCommaRepairHandlesEscapedQuotesInsideStrings() {
+        JsonObject result = ModelJson.parseObject("{\"say\":\"he said \\\"hi\\\",\",\"n\":2,}");
+        assertEquals("he said \"hi\",", result.get("say").getAsString());
+    }
+
+    @Test
+    void repairsConsecutiveTrailingCommas() {
+        // `,,]` 需要连剥两遍；修复必须停在 [1]——宽松解析器会把残尾吞成 [1,null,null]，
+        // 幻影 null 到下游 getAsString() 会炸，此用例就是防它的回归。
+        JsonObject result = ModelJson.parseObject("{\"a\":[1,,]}");
+        assertEquals(1, result.getAsJsonArray("a").size());
+        assertEquals(1, result.getAsJsonArray("a").get(0).getAsInt());
+    }
 }

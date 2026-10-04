@@ -32,7 +32,11 @@ public final class ModelJson {
     /**
      * 从模型返回内容中解析出唯一的 JSON 对象。
      *
-     * <p>先按原样解析；失败时尝试“截断抢救”：模型顶到 max_tokens 时输出会在任意位置
+     * <p>解析前先剥尾随逗号（结构完整但顶在 {@code }} / {@code ]} 前的逗号，LLM 高频形态）：
+     * 必须在解析之前剥离——实测宽松解析器会把 {@code [1,,]} 这类残尾“接受”成带幻影 null
+     * 的数组，幻影 null 到下游 {@code getAsString()} 会炸，比解析失败更坏。
+     *
+     * <p>接着按原样解析；失败时尝试“截断抢救”：模型顶到 max_tokens 时输出会在任意位置
      * 断掉（finish_reason=length），已经写完整的字段与推荐仍有业务价值，不该整轮作废。
      * 抢救只回退到最后一个语法安全点并补全括号，不猜测缺失内容；修不出有效对象时
      * 仍然抛 {@link IllegalArgumentException}，由调用方按畸形输出走降级。
@@ -50,12 +54,15 @@ public final class ModelJson {
         if (start < 0) {
             throw new IllegalArgumentException("模型返回内容里找不到 JSON 对象：" + content);
         }
-        String full = candidate.substring(start);
+        // 尾随逗号修复前置（多遍剥到不动点）：合法 JSON 中 } 与 ] 之前不存在逗号，剥掉是恒等
+        // 操作；但它必须发生在解析之前——宽松解析器会把 [1,,] 这类残尾接受成 [1,null,null]
+        // 的幻影元素，幻影 null 到下游 getAsString() 会炸，比解析失败更坏。
+        String full = stripTrailingCommas(candidate.substring(start));
         int end = candidate.lastIndexOf('}');
         // head 是“切到最后一个右花括号”的版本：模型在 JSON 后夹带说明文字时靠它剥掉尾巴。
         // 但截断时“最后一个右花括号”之后还可能有写了一半的结构（含完整字段），
         // 所以 head 修不出来时要退回全长 full 再试，抢救才能尽量多救。
-        String head = end > start ? candidate.substring(start, end + 1) : full;
+        String head = end > start ? stripTrailingCommas(candidate.substring(start, end + 1)) : full;
 
         JsonObject parsed = tryParse(head);
         if (parsed != null) {
@@ -87,6 +94,58 @@ public final class ModelJson {
         JsonObject salvaged = tryParse(repaired);
         // 空对象视为抢救失败：模型还没写任何有效字段就断了，交回去只会误导业务。
         return salvaged != null && salvaged.size() > 0 ? salvaged : null;
+    }
+
+    /**
+     * 反复剥掉顶在 {@code }} 或 {@code ]} 前的尾随逗号（如 {@code {"a":1,}}、{@code [1,2,]}、
+     * {@code [1,,]}），直到不动点。合法 JSON 中 } 与 ] 之前不存在逗号，剥掉不改变任何合法语义；
+     * 字符串内部的逗号原样保留。单遍只会剥连续逗号里的最后一颗（前一颗的“下一颗仍是逗号”
+     * 使其暂被保留），所以 {@code ,,]} 必须迭代剥离——每遍至少少一个字符，必然终止。
+     */
+    static String stripTrailingCommas(String json) {
+        String current = json;
+        while (true) {
+            String stripped = stripTrailingCommasOnce(current);
+            if (stripped.equals(current)) {
+                return current;
+            }
+            current = stripped;
+        }
+    }
+
+    /** 单遍剥离：仅丢弃“下一个非空白字符是 } 或 ]”的逗号；字符串内部的逗号原样保留。 */
+    private static String stripTrailingCommasOnce(String json) {
+        StringBuilder out = new StringBuilder(json.length());
+        boolean inString = false;
+        boolean escaped = false;
+        for (int i = 0; i < json.length(); i++) {
+            char c = json.charAt(i);
+            if (inString) {
+                out.append(c);
+                if (escaped) {
+                    escaped = false;
+                } else if (c == '\\') {
+                    escaped = true;
+                } else if (c == '"') {
+                    inString = false;
+                }
+                continue;
+            }
+            if (c == '"') {
+                inString = true;
+            } else if (c == ',') {
+                // 向后跳过空白：紧跟 } 或 ] 的逗号丢弃，其余逗号原样保留。
+                int next = i + 1;
+                while (next < json.length() && Character.isWhitespace(json.charAt(next))) {
+                    next++;
+                }
+                if (next < json.length() && (json.charAt(next) == '}' || json.charAt(next) == ']')) {
+                    continue;
+                }
+            }
+            out.append(c);
+        }
+        return out.toString();
     }
 
     /** 尝试解析为 JSON 对象；任何语法问题都返回 null，由调用方决定抢救或降级。 */
