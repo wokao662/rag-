@@ -43,6 +43,47 @@ class RecommendationValidatorTest {
     }
 
     @Test
+    void acceptsExplainWithoutRecommendations() {
+        JsonObject output = JsonParser.parseString("""
+                {
+                  "status": "explain",
+                  "answer": "间隔学习可以这样落地：今天先过20个新词，明天、第三天、第七天各复习一次……",
+                  "recommendations": [],
+                  "followUpQuestions": ["要不要我帮你排一个30天复习表？"]
+                }
+                """).getAsJsonObject();
+
+        RecommendationValidator.Output result = validator.validate(output, candidateChunkIds);
+
+        assertEquals("explain", result.status());
+        assertEquals(0, result.recommendations().size());
+        assertEquals(1, result.followUpQuestions().size());
+    }
+
+    @Test
+    void acceptsExplainCarryingTheTaughtStrategy() {
+        JsonObject output = JsonParser.parseString("""
+                {
+                  "status": "explain",
+                  "answer": "关键词助记的具体做法是：给每个单词配一个发音相近的画面……",
+                  "recommendations": [
+                    {
+                      "strategyId": "strategy-keyword-mnemonic",
+                      "strategyName": "关键词助记",
+                      "reason": "展开讲解时携带的被追问策略",
+                      "citations": ["chunk-1"]
+                    }
+                  ]
+                }
+                """).getAsJsonObject();
+
+        RecommendationValidator.Output result = validator.validate(output, candidateChunkIds);
+
+        assertEquals("explain", result.status());
+        assertEquals(1, result.recommendations().size());
+    }
+
+    @Test
     void rejectsCitationOutsideCandidates() {
         JsonObject output = JsonParser.parseString("""
                 {

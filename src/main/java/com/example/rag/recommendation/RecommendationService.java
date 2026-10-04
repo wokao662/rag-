@@ -57,14 +57,32 @@ public class RecommendationService {
         this.governance = governance;
     }
 
+    /**
+     * 一轮推荐的轻量对话上下文：当前消息原文 + 最近消息摘要。推荐模型靠它识别
+     * “用户是在对已推荐的方法追问细节”这类意图——缺少它时，追问与首次请求的
+     * 输入几乎相同，模型只会把同样的推荐原样再来一遍。
+     */
+    public record TurnContext(String currentUserMessage, List<ConversationSnippet> recentMessages) {
+        public static TurnContext empty() {
+            return new TurnContext(null, List.of());
+        }
+    }
+
+    /** 对话历史的一条精简摘要；content 由调用方负责截断。 */
+    public record ConversationSnippet(String role, String content) {
+    }
+
     /** 推荐生成调用的两种形态（整块 / 流式）共用同一条管线，入口方法只决定怎么调。 */
     @FunctionalInterface
     private interface ChatGenerator {
-        ModelReply<JsonObject> generate(JsonObject profile, String queryText, JsonArray knowledge) throws IOException;
+        ModelReply<JsonObject> generate(JsonObject profile, String queryText, JsonArray knowledge,
+                                        TurnContext context) throws IOException;
     }
 
-    public RecommendationResult recommend(JsonObject profile, UUID userId, UUID conversationId) {
-        return recommendInternal(profile, userId, conversationId, chatClient::generate);
+    public RecommendationResult recommend(JsonObject profile, UUID userId, UUID conversationId,
+                                          TurnContext context) {
+        return recommendInternal(profile, userId, conversationId,
+                context == null ? TurnContext.empty() : context, chatClient::generate);
     }
 
     /**
@@ -72,15 +90,17 @@ public class RecommendationService {
      * （用户先看到开头的话逐字出现），检索、闸门、校验、日志照常，返回结果与 recommend 同构。
      */
     public RecommendationResult recommendStreaming(JsonObject profile, UUID userId, UUID conversationId,
-                                                   Consumer<String> answerDelta) {
+                                                   TurnContext context, Consumer<String> answerDelta) {
         return recommendInternal(profile, userId, conversationId,
-                (queryProfile, queryText, knowledge) ->
-                        chatClient.generateStream(queryProfile, queryText, knowledge, answerDelta));
+                context == null ? TurnContext.empty() : context,
+                (queryProfile, queryText, knowledge, turnContext) ->
+                        chatClient.generateStream(queryProfile, queryText, knowledge, turnContext, answerDelta));
     }
 
     private RecommendationResult recommendInternal(JsonObject profile, UUID userId, UUID conversationId,
-                                                   ChatGenerator generator) {
-        String queryText = queryBuilder.build(profile);
+                                                   TurnContext context, ChatGenerator generator) {
+        // 当前问题必须进入检索文本：此前只用画像拼查询，用户问什么检索结果都一样。
+        String queryText = queryBuilder.build(profile, context.currentUserMessage());
         long start = System.currentTimeMillis();
 
         JsonArray knowledge;
@@ -104,28 +124,29 @@ public class RecommendationService {
             knowledge = budgeted.knowledge();
             knowledgeDropped += budgeted.droppedChunks();
         } catch (IOException error) {
-            logCall(userId, conversationId, queryText, 0, 0, null, start, "failed", error.getMessage(), null);
+            logCall(userId, conversationId, queryText, context, 0, 0, null, start, "failed", error.getMessage(), null);
             throw new RecommendationUnavailableException("策略检索服务暂时不可用", error);
         }
 
         if (knowledge.size() == 0) {
+            // 兜底文案同样不得声称知识库状态（“知识库里没有”）：系统与用户看到的都只是本次检索结果。
             RecommendationResult empty = new RecommendationResult(
-                    "no_match", "知识库中还没有可推荐的学习策略，请稍后再试。",
+                    "no_match", "这次没有找到相关的学习策略，请换个说法再试一次。",
                     queryText, List.of(), List.of(), List.of(), List.of());
-            logCall(userId, conversationId, queryText, filteredOut, knowledgeDropped, outputOf(empty), start,
+            logCall(userId, conversationId, queryText, context, filteredOut, knowledgeDropped, outputOf(empty), start,
                     "success", null, null);
             return empty;
         }
 
         ModelReply<JsonObject> reply;
         try {
-            reply = generator.generate(profile, queryText, knowledge);
+            reply = generator.generate(profile, queryText, knowledge, context);
         } catch (IOException error) {
             // 内容解析失败时 token 已经花掉了：MalformedOutputException 自带用量，照记不丢。
             // 其余失败（HTTP 错误、响应结构异常）确实没有可用的用量，维持 null。
             TokenUsage usage = error instanceof RecommendationChatClient.MalformedOutputException malformed
                     ? malformed.usage() : null;
-            logCall(userId, conversationId, queryText, filteredOut, knowledgeDropped, null, start, "failed",
+            logCall(userId, conversationId, queryText, context, filteredOut, knowledgeDropped, null, start, "failed",
                     error.getMessage(), usage);
             throw new RecommendationUnavailableException("推荐生成服务暂时不可用", error);
         }
@@ -137,14 +158,14 @@ public class RecommendationService {
         } catch (IllegalArgumentException error) {
             // 校验失败时 token 已经花掉了，用量照记。这类行正是“模型输出不合规范”的样本，
             // 而它花了多少 token 是判定该压 max_tokens 还是该改提示词的依据。
-            logCall(userId, conversationId, queryText, filteredOut, knowledgeDropped, raw, start, "failed",
+            logCall(userId, conversationId, queryText, context, filteredOut, knowledgeDropped, raw, start, "failed",
                     error.getMessage(), reply.usage());
             throw new RecommendationUnavailableException("推荐结果未通过格式校验", error);
         }
         RecommendationResult result = new RecommendationResult(output.status(), output.answer(), queryText,
                 output.userConstraints(), output.recommendations(), output.followUpQuestions(),
                 evidenceSources(knowledge, output.recommendations()));
-        logCall(userId, conversationId, queryText, filteredOut, knowledgeDropped, outputOf(result), start,
+        logCall(userId, conversationId, queryText, context, filteredOut, knowledgeDropped, outputOf(result), start,
                 "success", null, reply.usage());
         recordExposure(userId, result.recommendations());
         return result;
@@ -218,11 +239,15 @@ public class RecommendationService {
      * @param usage token 用量。检索阶段失败、知识库为空、生成请求失败这三种情况都没有真正
      *              调用模型，传 {@code null}。
      */
-    private void logCall(UUID userId, UUID conversationId, String queryText, int gateFilteredOut,
-                         int knowledgeDropped, JsonObject output, long start, String status, String errorMessage,
-                         TokenUsage usage) {
+    private void logCall(UUID userId, UUID conversationId, String queryText, TurnContext context,
+                         int gateFilteredOut, int knowledgeDropped, JsonObject output, long start, String status,
+                         String errorMessage, TokenUsage usage) {
         JsonObject input = new JsonObject();
         input.addProperty("queryText", queryText);
+        // 记下用户当前原话：出了“追问被当成新推荐”这类问题时，这行日志就是第一现场。
+        if (context.currentUserMessage() != null && !context.currentUserMessage().isBlank()) {
+            input.addProperty("currentUserMessage", context.currentUserMessage());
+        }
         // 把闸门挡下的数量记进日志：推荐突然变空时，这是区分“没召回”与“被闸门挡下”的唯一证据。
         input.addProperty("gateFilteredOut", gateFilteredOut);
         // 同理记下补齐时被预算截断的数量：推荐质量下降时得能区分“闸门挡的”“截断丢的”与

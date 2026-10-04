@@ -10,7 +10,7 @@ import java.util.Set;
 
 /** 对推荐模型的输出做结构和一致性校验；引用必须指向真实检索到的 chunk。 */
 public final class RecommendationValidator {
-    private static final Set<String> ALLOWED_STATUS = Set.of("answer", "clarify", "no_match");
+    private static final Set<String> ALLOWED_STATUS = Set.of("answer", "explain", "clarify", "no_match");
     private static final int MAX_RECOMMENDATIONS = 3;
 
     public record Recommendation(
@@ -36,13 +36,14 @@ public final class RecommendationValidator {
     public Output validate(JsonObject output, Set<String> candidateChunkIds) {
         String status = requiredString(output, "status");
         if (!ALLOWED_STATUS.contains(status)) {
-            throw new IllegalArgumentException("status 只能是 answer、clarify 或 no_match");
+            throw new IllegalArgumentException("status 只能是 answer、explain、clarify 或 no_match");
         }
         String answer = requiredString(output, "answer");
         List<String> userConstraints = optionalStringList(output, "userConstraints");
         List<Recommendation> recommendations = recommendations(output, candidateChunkIds);
         List<String> followUpQuestions = optionalStringList(output, "followUpQuestions");
 
+        // explain 是对已推荐方法的追问展开：正文在 answer 里，不强制携带推荐卡片。
         if ("answer".equals(status) && recommendations.isEmpty()) {
             throw new IllegalArgumentException("answer 状态必须包含至少一条推荐");
         }
