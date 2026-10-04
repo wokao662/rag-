@@ -4,6 +4,7 @@ import com.google.gson.JsonObject;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -59,9 +60,38 @@ class ModelJsonTest {
     }
 
     @Test
-    void rejectsMalformedJson() {
-        // 截断或语法错误：JsonParser 抛 JsonParseException（RuntimeException 子类），
-        // 客户端既有 try/catch(RuntimeException) 会转成 IOException 走降级。
-        assertThrows(RuntimeException.class, () -> ModelJson.parseObject("{\"goal\":\"未闭合"));
+    void rejectsTruncationWithoutSalvageableContent() {
+        // 截断太早，抢救只能得到空对象（无业务价值），仍按畸形输出抛 IllegalArgumentException，
+        // 由三路客户端统一转成 MalformedOutputException（带 finish_reason 诊断）走降级。
+        assertThrows(IllegalArgumentException.class, () -> ModelJson.parseObject("{\"goal\":\"未闭合"));
+    }
+
+    @Test
+    void repairsTruncationAtArrayElement() {
+        // 模拟推荐被 max_tokens 截断：第二个推荐写到一半。第一个推荐完整，
+        // 第二个里已写完的字段（strategyId）也一并救回，残缺字段丢弃。
+        String content = "{\"status\":\"answer\",\"answer\":\"好的\","
+                + "\"recommendations\":[{\"strategyId\":\"a\",\"reason\":\"r1\"},{\"strategyId\":\"b\",\"rea";
+        JsonObject result = ModelJson.parseObject(content);
+        assertEquals("answer", result.get("status").getAsString());
+        assertEquals(2, result.getAsJsonArray("recommendations").size());
+        assertEquals("a", result.getAsJsonArray("recommendations").get(0)
+                .getAsJsonObject().get("strategyId").getAsString());
+        assertEquals("b", result.getAsJsonArray("recommendations").get(1)
+                .getAsJsonObject().get("strategyId").getAsString());
+    }
+
+    @Test
+    void repairsTruncationMidString() {
+        // 截断落在半个字符串里：只保留之前写完的字段，残缺字段整体丢弃。
+        JsonObject result = ModelJson.parseObject("{\"goal\":\"四级\",\"notes\":\"还没写完的半句话");
+        assertEquals("四级", result.get("goal").getAsString());
+        assertFalse(result.has("notes"));
+    }
+
+    @Test
+    void repairsTruncationDanglingKey() {
+        // 截断悬在“键刚写完、值还没写”的位置：悬空键与逗号一并剥掉。
+        assertEquals(1, ModelJson.parseObject("{\"a\":1,\"b\":").get("a").getAsInt());
     }
 }
