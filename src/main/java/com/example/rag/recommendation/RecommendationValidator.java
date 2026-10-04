@@ -6,9 +6,17 @@ import com.google.gson.JsonObject;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
-/** 对推荐模型的输出做结构和一致性校验；引用必须指向真实检索到的 chunk。 */
+/**
+ * 对推荐模型的输出做结构和一致性校验；引用必须指向真实检索到的 chunk。
+ *
+ * <p>引用的输入形态是参考资料里的短编号（K1…，由 RecommendationService.annotateRefs 分配）：
+ * 长 chunkId 自 2026-10-04 起不再交给模型抄写（实测会抄错单个字符导致整轮作废），
+ * 校验时映射回真实 chunkId 落库，下游无感知。
+ */
 public final class RecommendationValidator {
     private static final Set<String> ALLOWED_STATUS = Set.of("answer", "explain", "clarify", "no_match");
     private static final int MAX_RECOMMENDATIONS = 3;
@@ -33,14 +41,14 @@ public final class RecommendationValidator {
     ) {
     }
 
-    public Output validate(JsonObject output, Set<String> candidateChunkIds) {
+    public Output validate(JsonObject output, Map<String, String> citationIndex) {
         String status = requiredString(output, "status");
         if (!ALLOWED_STATUS.contains(status)) {
             throw new IllegalArgumentException("status 只能是 answer、explain、clarify 或 no_match");
         }
         String answer = requiredString(output, "answer");
         List<String> userConstraints = optionalStringList(output, "userConstraints");
-        List<Recommendation> recommendations = recommendations(output, candidateChunkIds);
+        List<Recommendation> recommendations = recommendations(output, citationIndex);
         List<String> followUpQuestions = optionalStringList(output, "followUpQuestions");
 
         // explain 是对已推荐方法的追问展开：正文在 answer 里，不强制携带推荐卡片。
@@ -58,7 +66,7 @@ public final class RecommendationValidator {
                 List.copyOf(recommendations), List.copyOf(followUpQuestions));
     }
 
-    private static List<Recommendation> recommendations(JsonObject output, Set<String> candidateChunkIds) {
+    private static List<Recommendation> recommendations(JsonObject output, Map<String, String> citationIndex) {
         JsonElement value = output.get("recommendations");
         if (value == null || !value.isJsonArray()) {
             throw new IllegalArgumentException("recommendations 必须是数组");
@@ -74,10 +82,9 @@ public final class RecommendationValidator {
             }
             JsonObject recommendation = item.getAsJsonObject();
             List<String> citations = optionalStringList(recommendation, "citations");
+            List<String> resolved = new ArrayList<>(citations.size());
             for (String citation : citations) {
-                if (!candidateChunkIds.contains(citation)) {
-                    throw new IllegalArgumentException("citations 引用了检索结果之外的 chunkId：" + citation);
-                }
+                resolved.add(resolveCitation(citation, citationIndex));
             }
             result.add(new Recommendation(
                     requiredString(recommendation, "strategyId"),
@@ -85,11 +92,26 @@ public final class RecommendationValidator {
                     requiredString(recommendation, "reason"),
                     optionalStringList(recommendation, "methodSteps"),
                     optionalStringList(recommendation, "sourceIds"),
-                    citations,
+                    resolved,
                     optionalStringList(recommendation, "caveats")
             ));
         }
         return result;
+    }
+
+    /**
+     * 把模型给出的引用解析回真实 chunkId：首选 ref 编号（大小写宽容）；
+     * 兼容模型直接输出真实 chunkId 的旧形态；都不中时按引用越界拒绝。
+     */
+    private static String resolveCitation(String citation, Map<String, String> citationIndex) {
+        String chunkId = citationIndex.get(citation.toUpperCase(Locale.ROOT));
+        if (chunkId == null && citationIndex.containsValue(citation)) {
+            chunkId = citation;
+        }
+        if (chunkId == null) {
+            throw new IllegalArgumentException("citations 引用了参考资料之外的条目：" + citation);
+        }
+        return chunkId;
     }
 
     private static String requiredString(JsonObject object, String name) {

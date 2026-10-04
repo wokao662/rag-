@@ -123,6 +123,8 @@ public class RecommendationService {
             BudgetedKnowledge budgeted = trimToBudget(knowledge, KNOWLEDGE_BUDGET_CHARS);
             knowledge = budgeted.knowledge();
             knowledgeDropped += budgeted.droppedChunks();
+            // 引用编号化：知识集定型后统一编号，模型渲染与引用校验共用同一份 ref 映射。
+            annotateRefs(knowledge);
         } catch (IOException error) {
             logCall(userId, conversationId, queryText, context, 0, 0, null, start, "failed", error.getMessage(), null);
             throw new RecommendationUnavailableException("策略检索服务暂时不可用", error);
@@ -144,17 +146,26 @@ public class RecommendationService {
         } catch (IOException error) {
             // 内容解析失败时 token 已经花掉了：MalformedOutputException 自带用量，照记不丢。
             // 其余失败（HTTP 错误、响应结构异常）确实没有可用的用量，维持 null。
-            TokenUsage usage = error instanceof RecommendationChatClient.MalformedOutputException malformed
-                    ? malformed.usage() : null;
-            logCall(userId, conversationId, queryText, context, filteredOut, knowledgeDropped, null, start, "failed",
-                    error.getMessage(), usage);
+            JsonObject failureOutput = null;
+            TokenUsage usage = null;
+            // 解析失败的完整原文留存（对齐 decide 的 rawContent 修复）：错误信息只有 120 字符尾部，
+            // 而实测出错的 JSON 头尾都合法、脏字符在中部——没有全文就永远定位不到那一个字符。
+            if (error instanceof RecommendationChatClient.MalformedOutputException malformed) {
+                usage = malformed.usage();
+                if (malformed.rawContent() != null) {
+                    failureOutput = new JsonObject();
+                    failureOutput.addProperty("rawContent", malformed.rawContent());
+                }
+            }
+            logCall(userId, conversationId, queryText, context, filteredOut, knowledgeDropped, failureOutput,
+                    start, "failed", error.getMessage(), usage);
             throw new RecommendationUnavailableException("推荐生成服务暂时不可用", error);
         }
         JsonObject raw = reply.content();
 
         RecommendationValidator.Output output;
         try {
-            output = validator.validate(raw, candidateChunkIds(knowledge));
+            output = validator.validate(raw, citationIndex(knowledge));
         } catch (IllegalArgumentException error) {
             // 校验失败时 token 已经花掉了，用量照记。这类行正是“模型输出不合规范”的样本，
             // 而它花了多少 token 是判定该压 max_tokens 还是该改提示词的依据。
@@ -374,6 +385,34 @@ public class RecommendationService {
             ids.add(element.getAsJsonObject().get("chunkId").getAsString());
         }
         return ids;
+    }
+
+    /**
+     * 给每个知识条目分配模型可引用的短编号（K1、K2…），编号与数组顺序一一对应。
+     *
+     * <p>2026-10-04 实测：模型把 38 位 chunkId 抄错 1 个字符（b91d→b51d），引用语义完全正确
+     * 却被校验器整轮否决。逐字转写长 UUID 是 LLM 的固有高错操作——从渲染层起就不再把
+     * chunkId 交给模型，引用统一走 2~3 字符的 ref，从根上消灭转写错误。
+     */
+    static void annotateRefs(JsonArray knowledge) {
+        for (int i = 0; i < knowledge.size(); i++) {
+            JsonObject original = knowledge.get(i).getAsJsonObject();
+            JsonObject annotated = new JsonObject();
+            annotated.addProperty("ref", "K" + (i + 1));
+            original.entrySet().forEach(entry -> annotated.add(entry.getKey(), entry.getValue()));
+            knowledge.set(i, annotated);
+        }
+    }
+
+    /** 引用校验索引：ref 编号 → 真实 chunkId；缺 ref 或 chunkId 的条目防御式跳过。 */
+    static Map<String, String> citationIndex(JsonArray knowledge) {
+        Map<String, String> index = new LinkedHashMap<>();
+        for (JsonElement element : knowledge) {
+            JsonObject item = element.getAsJsonObject();
+            if (!item.has("ref") || !item.has("chunkId")) continue;
+            index.put(item.get("ref").getAsString(), item.get("chunkId").getAsString());
+        }
+        return index;
     }
 
     /**

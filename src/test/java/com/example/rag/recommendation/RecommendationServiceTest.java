@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -175,6 +176,38 @@ class RecommendationServiceTest {
         assertEquals(2, budgeted.knowledge().size());
         assertEquals("a-2", budgeted.knowledge().get(1).getAsJsonObject().get("chunkId").getAsString());
         assertEquals(2, budgeted.droppedChunks());
+    }
+
+    @Test
+    void annotateRefsNumbersInOrderAndCitationIndexMapsBack() {
+        JsonArray knowledge = new JsonArray();
+        knowledge.add(knowledgeEntry("definition", "a-1", "strategy-a", "A", "内容"));
+        knowledge.add(knowledgeEntry("steps", "a-2", "strategy-a", "A", "内容"));
+
+        RecommendationService.annotateRefs(knowledge);
+
+        assertEquals("K1", knowledge.get(0).getAsJsonObject().get("ref").getAsString());
+        assertEquals("K2", knowledge.get(1).getAsJsonObject().get("ref").getAsString());
+        // 编号只是给模型的引用入口，真实 chunkId 保留在条目里供校验映射与下游使用。
+        assertEquals("a-1", knowledge.get(0).getAsJsonObject().get("chunkId").getAsString());
+        Map<String, String> index = RecommendationService.citationIndex(knowledge);
+        assertEquals("a-2", index.get("K2"));
+        assertEquals(2, index.size());
+    }
+
+    @Test
+    void citationIndexSkipsEntriesMissingRefOrChunkId() {
+        JsonArray knowledge = new JsonArray();
+        knowledge.add(knowledgeEntry("definition", "a-1", "strategy-a", "A", "内容"));
+        knowledge.add(knowledgeEntry("definition", "b-1", "strategy-b", "B", "内容"));
+        RecommendationService.annotateRefs(knowledge);
+        // 模拟畸形数据：某条缺 chunkId——防御式跳过，不产生半截映射。
+        knowledge.get(1).getAsJsonObject().remove("chunkId");
+
+        Map<String, String> index = RecommendationService.citationIndex(knowledge);
+
+        assertEquals(1, index.size());
+        assertEquals("a-1", index.get("K1"));
     }
 
     private static JsonObject knowledgeEntry(String chunkType, String chunkId, String strategyId,

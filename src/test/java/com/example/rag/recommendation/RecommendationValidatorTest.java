@@ -4,14 +4,14 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.junit.jupiter.api.Test;
 
-import java.util.Set;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class RecommendationValidatorTest {
     private final RecommendationValidator validator = new RecommendationValidator();
-    private final Set<String> candidateChunkIds = Set.of("chunk-1", "chunk-2");
+    private final Map<String, String> citationIndex = Map.of("K1", "chunk-1", "K2", "chunk-2");
 
     @Test
     void acceptsValidAnswer() {
@@ -27,7 +27,7 @@ class RecommendationValidatorTest {
                       "reason": "适合记单词很快忘的情况",
                       "methodSteps": ["把复习分散到多天"],
                       "sourceIds": ["source-001"],
-                      "citations": ["chunk-1"],
+                      "citations": ["K1"],
                       "caveats": []
                     }
                   ],
@@ -35,11 +35,13 @@ class RecommendationValidatorTest {
                 }
                 """).getAsJsonObject();
 
-        RecommendationValidator.Output result = validator.validate(output, candidateChunkIds);
+        RecommendationValidator.Output result = validator.validate(output, citationIndex);
 
         assertEquals("answer", result.status());
         assertEquals(1, result.recommendations().size());
         assertEquals("strategy-distributed-practice", result.recommendations().get(0).strategyId());
+        // ref 编号在校验时映射回真实 chunkId：下游与落库拿到的永远是 chunkId。
+        assertEquals("chunk-1", result.recommendations().get(0).citations().get(0));
     }
 
     @Test
@@ -53,7 +55,7 @@ class RecommendationValidatorTest {
                 }
                 """).getAsJsonObject();
 
-        RecommendationValidator.Output result = validator.validate(output, candidateChunkIds);
+        RecommendationValidator.Output result = validator.validate(output, citationIndex);
 
         assertEquals("explain", result.status());
         assertEquals(0, result.recommendations().size());
@@ -71,13 +73,13 @@ class RecommendationValidatorTest {
                       "strategyId": "strategy-keyword-mnemonic",
                       "strategyName": "关键词助记",
                       "reason": "展开讲解时携带的被追问策略",
-                      "citations": ["chunk-1"]
+                      "citations": ["K1"]
                     }
                   ]
                 }
                 """).getAsJsonObject();
 
-        RecommendationValidator.Output result = validator.validate(output, candidateChunkIds);
+        RecommendationValidator.Output result = validator.validate(output, citationIndex);
 
         assertEquals("explain", result.status());
         assertEquals(1, result.recommendations().size());
@@ -94,13 +96,80 @@ class RecommendationValidatorTest {
                       "strategyId": "strategy-distributed-practice",
                       "strategyName": "分散练习",
                       "reason": "适合记单词很快忘的情况",
-                      "citations": ["chunk-not-retrieved"]
+                      "citations": ["K9"]
                     }
                   ]
                 }
                 """).getAsJsonObject();
 
-        assertThrows(IllegalArgumentException.class, () -> validator.validate(output, candidateChunkIds));
+        assertThrows(IllegalArgumentException.class, () -> validator.validate(output, citationIndex));
+    }
+
+    @Test
+    void mapsRefCitationCaseInsensitivelyBackToChunkId() {
+        JsonObject output = JsonParser.parseString("""
+                {
+                  "status": "explain",
+                  "answer": "展开讲解。",
+                  "recommendations": [
+                    {
+                      "strategyId": "strategy-distributed-practice",
+                      "strategyName": "分散练习",
+                      "reason": "r",
+                      "citations": ["k1"]
+                    }
+                  ]
+                }
+                """).getAsJsonObject();
+
+        RecommendationValidator.Output result = validator.validate(output, citationIndex);
+
+        assertEquals("chunk-1", result.recommendations().get(0).citations().get(0));
+    }
+
+    @Test
+    void acceptsRawChunkIdCitationForCompatibility() {
+        // 模型偶尔绕过 ref 直接输出真实 chunkId：兼容放行，输出仍是 chunkId。
+        JsonObject output = JsonParser.parseString("""
+                {
+                  "status": "explain",
+                  "answer": "展开讲解。",
+                  "recommendations": [
+                    {
+                      "strategyId": "strategy-distributed-practice",
+                      "strategyName": "分散练习",
+                      "reason": "r",
+                      "citations": ["chunk-2"]
+                    }
+                  ]
+                }
+                """).getAsJsonObject();
+
+        RecommendationValidator.Output result = validator.validate(output, citationIndex);
+
+        assertEquals("chunk-2", result.recommendations().get(0).citations().get(0));
+    }
+
+    @Test
+    void rejectsTranscriptionErrorInRawChunkId() {
+        // 回归 2026-10-04：真实 chunkId 抄错 1 个字符（b91d→b51d）——既不是合法 ref
+        // 也不是真实 chunkId，必须拒绝。
+        JsonObject output = JsonParser.parseString("""
+                {
+                  "status": "explain",
+                  "answer": "展开讲解。",
+                  "recommendations": [
+                    {
+                      "strategyId": "strategy-distributed-practice",
+                      "strategyName": "分散练习",
+                      "reason": "r",
+                      "citations": ["chunk-11"]
+                    }
+                  ]
+                }
+                """).getAsJsonObject();
+
+        assertThrows(IllegalArgumentException.class, () -> validator.validate(output, citationIndex));
     }
 
     @Test
@@ -119,7 +188,7 @@ class RecommendationValidatorTest {
                 }
                 """).getAsJsonObject();
 
-        assertThrows(IllegalArgumentException.class, () -> validator.validate(output, candidateChunkIds));
+        assertThrows(IllegalArgumentException.class, () -> validator.validate(output, citationIndex));
     }
 
     @Test
@@ -132,7 +201,7 @@ class RecommendationValidatorTest {
                 }
                 """).getAsJsonObject();
 
-        assertThrows(IllegalArgumentException.class, () -> validator.validate(output, candidateChunkIds));
+        assertThrows(IllegalArgumentException.class, () -> validator.validate(output, citationIndex));
     }
 
     @Test
@@ -145,7 +214,7 @@ class RecommendationValidatorTest {
                 }
                 """).getAsJsonObject();
 
-        assertThrows(IllegalArgumentException.class, () -> validator.validate(output, candidateChunkIds));
+        assertThrows(IllegalArgumentException.class, () -> validator.validate(output, citationIndex));
     }
 
     @Test
@@ -163,6 +232,6 @@ class RecommendationValidatorTest {
                 }
                 """).getAsJsonObject();
 
-        assertThrows(IllegalArgumentException.class, () -> validator.validate(output, candidateChunkIds));
+        assertThrows(IllegalArgumentException.class, () -> validator.validate(output, citationIndex));
     }
 }
