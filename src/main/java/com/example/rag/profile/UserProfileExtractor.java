@@ -52,15 +52,19 @@ public final class UserProfileExtractor implements AutoCloseable {
             8. 只输出合法JSON，不输出Markdown和分析过程。
 
             你还要判断这条消息属于哪个「目标情境」。一个目标情境 = 用户当前正在攻克的一个
-            具体学习任务（例如“四级听力”“数学期末考”）。输入里的 existingEpisodes 是用户
+            具体学习任务（例如“四级听力”“数学期末考”），或用户明确要求优先解决的、与当前
+            任务不同的具体问题（例如“注意力管理”“学习焦虑”）。输入里的 existingEpisodes 是用户
             已有的活跃情境清单，每项含 id、label、goal、content。episodeDecision 规则：
             1. 消息明显在继续清单里的某个情境（同一学习目标或内容）时，action="continue"，
                并给出该情境的 episodeId。
             2. 这是清单里没有的、新的学习目标时，action="new"，并给出一个简短中文 label
                （不超过12个字，概括这个情境，如“四级听力”），episodeId 留空字符串。
-            3. 拿不准时优先 continue 到最接近的活跃情境，不要轻易开新情境，避免情境碎片化。
-            4. 同一学科下的不同任务算不同情境（“英语期末完形”与“四级听力”是两个情境）。
-            5. existingEpisodes 为空时，一律 action="new" 并给出 label。
+            3. 用户明确要求搁置当前话题、优先解决另一个问题时（例如“先别谈背单词了，先解决
+               注意力问题”），即使它不属于典型学科任务，也按 action="new" 处理，并给出简短
+               label（如“注意力管理”）——明确的切换要求优先于下一条的保守规则。
+            4. 拿不准时优先 continue 到最接近的活跃情境，不要轻易开新情境，避免情境碎片化。
+            5. 同一学科下的不同任务算不同情境（“英语期末完形”与“四级听力”是两个情境）。
+            6. existingEpisodes 为空时，一律 action="new" 并给出 label。
 
             输出结构：
             {
