@@ -20,6 +20,9 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <tika.version>4.0.0</tika.version>
         <exec.mainClass>com.example.rag.RagApplication</exec.mainClass>
+        <!-- index.html 里的 @maven.build.timestamp@ 会替换为 ISO-8601 构建时间，作为静态资源版本串，
+             每次构建自动换 URL 绕过 Cloudflare/浏览器缓存。旧的 maven.build.timestamp.format 属性
+             自 Maven 3.8.3 起已废弃（输出固定 ISO 格式），不要再加。 -->
     </properties>
 
     <dependencies>
@@ -81,6 +84,33 @@
     </dependencies>
 
     <build>
+        <resources>
+            <!-- 需要变量替换的资源：应用配置 + 前端入口页。index.html 里的
+                 @maven.build.timestamp@ 会替换为构建时间，作为 app.js/style.css 的版本串，
+                 每次构建自动换 URL，绕过 Cloudflare/浏览器的静态资源缓存。 -->
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>true</filtering>
+                <includes>
+                    <include>application*.yml</include>
+                    <include>application*.yaml</include>
+                    <include>application*.properties</include>
+                    <include>static/index.html</include>
+                </includes>
+            </resource>
+            <!-- 其余资源原样拷贝：app.js/style.css 与 db/migration 的 SQL 不能走过滤
+                 （JS 模板字符串与 SQL 内容必须保持原样）。 -->
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>false</filtering>
+                <excludes>
+                    <exclude>application*.yml</exclude>
+                    <exclude>application*.yaml</exclude>
+                    <exclude>application*.properties</exclude>
+                    <exclude>static/index.html</exclude>
+                </excludes>
+            </resource>
+        </resources>
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

@@ -18,6 +18,15 @@ spring:
     locations: classpath:db/migration
   jackson:
     default-property-inclusion: non_null
+  web:
+    resources:
+      cache:
+        cachecontrol:
+          # 前端静态资源不设长期缓存：Cloudflare 边缘此前按默认把 app.js/style.css 缓存 4 小时，
+          # 导致每次部署后公网用户仍拿旧前端。no-cache 让边缘/浏览器每次回源校验（304 开销极轻）。
+          # index.html 引用里的 ?v= 构建时间戳负责首次踢掉已存在的旧缓存，两者互为保险。
+          no-cache: true
+          must-revalidate: true
 
 server:
   port: ${SERVER_PORT:8080}
