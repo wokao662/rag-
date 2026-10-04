@@ -18,6 +18,7 @@ import javax.sql.DataSource;
 import java.io.IOException;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -28,6 +29,10 @@ import java.util.function.Consumer;
 @Service
 public class UserProfileService {
     private static final int RECENT_MESSAGE_LIMIT = 12;
+    /** 推荐上下文里单条历史消息的字符上限：只给模型“认出追问”用的提纲，不搬全文。 */
+    private static final int RECOMMENDATION_CONTEXT_MESSAGE_CHARS = 400;
+    /** 推荐上下文最多携带几条历史：上一轮推荐 + 这轮追问通常 4 条内，留一倍余量。 */
+    private static final int RECOMMENDATION_CONTEXT_MESSAGES = 6;
     private static final Gson GSON = new Gson();
 
     private final DataSource dataSource;
@@ -95,7 +100,8 @@ public class UserProfileService {
         if (decision.ready()) {
             try {
                 recommendation = recommendationService.recommend(
-                        prepared.activeView(), context.userId(), context.conversationId());
+                        prepared.activeView(), context.userId(), context.conversationId(),
+                        recommendationContext(context, content));
             } catch (RecommendationService.RecommendationUnavailableException ignored) {
                 // 推荐失败不阻断画像流程，前端可稍后通过推荐接口重试。
             }
@@ -126,13 +132,35 @@ public class UserProfileService {
             sink.stage("recommend");
             try {
                 recommendation = recommendationService.recommendStreaming(
-                        prepared.activeView(), context.userId(), context.conversationId(), sink::delta);
+                        prepared.activeView(), context.userId(), context.conversationId(),
+                        recommendationContext(context, content), sink::delta);
             } catch (RecommendationService.RecommendationUnavailableException ignored) {
                 // 与 processMessage 一致：推荐失败不阻断画像流程。
             }
         }
 
         sink.finished(finishTurn(context, prepared, decision, recommendation));
+    }
+
+    /**
+     * 给推荐链裁剪对话上下文：当前消息原文 + 最近若干条历史摘要（含上一轮推荐全文，
+     * 模型靠它把“这些方法”对上号）。当前这条用户消息已单独传递，不再重复进历史。
+     * 没有它时，追问“详细讲讲怎么做”与首次请求的输入几乎相同，模型只会把同样的推荐再来一遍。
+     */
+    private static RecommendationService.TurnContext recommendationContext(TurnContext context, String content) {
+        List<RecommendationService.ConversationSnippet> snippets = new ArrayList<>();
+        for (MessageRepository.StoredMessage message : context.recentMessages()) {
+            if (message.id().equals(context.messageId())) continue;
+            String text = message.content();
+            if (text.length() > RECOMMENDATION_CONTEXT_MESSAGE_CHARS) {
+                text = text.substring(0, RECOMMENDATION_CONTEXT_MESSAGE_CHARS) + "…";
+            }
+            snippets.add(new RecommendationService.ConversationSnippet(message.role(), text));
+        }
+        if (snippets.size() > RECOMMENDATION_CONTEXT_MESSAGES) {
+            snippets = snippets.subList(snippets.size() - RECOMMENDATION_CONTEXT_MESSAGES, snippets.size());
+        }
+        return new RecommendationService.TurnContext(content.trim(), List.copyOf(snippets));
     }
 
     /** 一轮对话的公共开头：保存用户消息、读出真实画像与最近上下文（含"是否本会话首条"）。 */
@@ -280,7 +308,8 @@ public class UserProfileService {
                     .map(UserProfileRepository.StoredProfile::profile)
                     .orElseThrow(() -> new ProfileNotFoundException("该用户还没有画像"));
         });
-        return recommendationService.recommend(EpisodeProfile.flattenedActiveView(profile), userHolder[0], null);
+        return recommendationService.recommend(EpisodeProfile.flattenedActiveView(profile), userHolder[0], null,
+                RecommendationService.TurnContext.empty());
     }
 
     private static final int CONVERSATION_TITLE_LENGTH = 30;
@@ -314,6 +343,7 @@ public class UserProfileService {
             ProfileDecisionValidator.Decision decision = reply.content();
             JsonObject output = new JsonObject();
             output.addProperty("action", decision.action());
+            output.addProperty("intent", decision.intent());
             output.addProperty("ready", decision.ready());
             output.addProperty("confidence", decision.confidence());
             output.addProperty("reason", decision.reason());
@@ -326,7 +356,7 @@ public class UserProfileService {
             callLogger.log(userId, conversationId, "decide", ConversationalProfileAgent.MODEL,
                     null, null, System.currentTimeMillis() - start, "fallback", error.getMessage(), null);
             return new ProfileDecisionValidator.Decision(
-                    fallback.ready() ? "recommend" : "ask", fallback.ready(), 0,
+                    fallback.ready() ? "recommend" : "ask", "unknown", fallback.ready(), 0,
                     "画像 Agent 调用失败，使用本地兜底规则", fallback.missingFields(), List.of(),
                     fallback.followUpQuestion() == null ? "" : fallback.followUpQuestion());
         }
@@ -348,6 +378,7 @@ public class UserProfileService {
             ProfileDecisionValidator.Decision decision = reply.content();
             JsonObject output = new JsonObject();
             output.addProperty("action", decision.action());
+            output.addProperty("intent", decision.intent());
             output.addProperty("ready", decision.ready());
             output.addProperty("confidence", decision.confidence());
             output.addProperty("reason", decision.reason());
@@ -359,7 +390,7 @@ public class UserProfileService {
             callLogger.log(userId, conversationId, "decide", ConversationalProfileAgent.MODEL,
                     null, null, System.currentTimeMillis() - start, "fallback", error.getMessage(), null);
             return new ProfileDecisionValidator.Decision(
-                    fallback.ready() ? "recommend" : "ask", fallback.ready(), 0,
+                    fallback.ready() ? "recommend" : "ask", "unknown", fallback.ready(), 0,
                     "画像 Agent 调用失败，使用本地兜底规则", fallback.missingFields(), List.of(),
                     fallback.followUpQuestion() == null ? "" : fallback.followUpQuestion());
         }

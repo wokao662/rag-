@@ -101,7 +101,7 @@ public final class UserProfileConversationTest {
                 } catch (Exception agentError) {
                     System.err.println("画像 Agent 暂时不可用，已使用本地规则继续：" + agentError.getMessage());
                     decision = new ProfileDecisionValidator.Decision(
-                            fallbackDecision.ready() ? "recommend" : "ask",
+                            fallbackDecision.ready() ? "recommend" : "ask", "unknown",
                             fallbackDecision.ready(), 0,
                             "画像 Agent 调用失败，使用本地兜底规则",
                             fallbackDecision.missingFields(), List.of(),

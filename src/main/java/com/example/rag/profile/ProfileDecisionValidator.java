@@ -11,10 +11,15 @@ import java.util.Set;
 /** 对对话画像 Agent 的决定做结构和安全边界校验。 */
 public final class ProfileDecisionValidator {
     private static final Set<String> ALLOWED_ACTIONS = Set.of("ask", "recommend");
+    /** 意图是观测字段（见 docs/intent-taxonomy.md）：白名单外一律记 unknown，不参与硬校验。 */
+    private static final Set<String> ALLOWED_INTENTS = Set.of(
+            "provide_info", "deepen", "explore", "evaluate", "switch", "chitchat");
+    private static final String UNKNOWN_INTENT = "unknown";
     private static final int MAX_QUESTION_LENGTH = 240;
 
     public record Decision(
             String action,
+            String intent,
             boolean ready,
             double confidence,
             String reason,
@@ -41,6 +46,7 @@ public final class ProfileDecisionValidator {
         }
 
         String reason = requiredString(output, "reason");
+        String intent = optionalIntent(output);
         List<String> missing = stringList(output, "missingInformation");
         List<String> conflicts = stringList(output, "conflicts");
         String nextQuestion = optionalString(output, "nextQuestion");
@@ -58,8 +64,21 @@ public final class ProfileDecisionValidator {
             throw new IllegalArgumentException("回复不能换行，请写成一段话");
         }
 
-        return new Decision(action, ready, confidence, reason,
+        return new Decision(action, intent, ready, confidence, reason,
                 List.copyOf(missing), List.copyOf(conflicts), nextQuestion);
+    }
+
+    /**
+     * 宽容解析观测字段 intent：缺失、类型错误或不在白名单内都记为 unknown。
+     * 与 requiredString 的“不合格即抛”相反——标注失败不得拖垮真实回答。
+     */
+    private static String optionalIntent(JsonObject object) {
+        JsonElement value = object.get("intent");
+        if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()) {
+            return UNKNOWN_INTENT;
+        }
+        String intent = value.getAsString().trim();
+        return ALLOWED_INTENTS.contains(intent) ? intent : UNKNOWN_INTENT;
     }
 
     private static String requiredString(JsonObject object, String name) {

@@ -58,9 +58,19 @@ public final class ConversationalProfileAgent implements AutoCloseable {
             5. reason 简短说明决定依据；不要在 reason 里给学习方法，推荐由后续 RAG 模块完成。
             6. 只返回合法 JSON，不要输出 Markdown 或思考过程。
 
+            意图标注（intent 字段）：每轮还要给用户这轮消息标一个意图，用于后续分析：
+            - provide_info：用户在提供关于自己的学习信息（首次求助、回答追问、补充约束）
+            - deepen：用户对已被推荐过的方法要更详细的步骤、例子或落地安排
+            - explore：用户想要当前推荐之外的新方法、新方向
+            - evaluate：用户以现状方案为参照，问够不够、行不行、还差什么
+            - switch：用户引入了与当前话题无关的新学习内容或新目标
+            - chitchat：消息不含学习信息、也没有明确求助（寒暄或纯情绪）
+            边界：“除了X还有什么方法”用 explore，“只靠X能行吗”用 evaluate；要的对象已被推荐过用 deepen，没推荐过用 explore；补充当前话题细节是 provide_info，引入无关新话题才是 switch。
+
             输出结构固定为：
             {
               "action": "ask 或 recommend",
+              "intent": "provide_info 或 deepen 或 explore 或 evaluate 或 switch 或 chitchat",
               "ready": true或false,
               "confidence": 0到1,
               "nextQuestion": "ask 时：上面要求的那段有温度的回复（接住用户+可选小提示+末尾一个问题）；recommend 时为空字符串",
