@@ -2,6 +2,7 @@ package com.example.rag.profile;
 
 import com.example.rag.observability.ModelCallLogger;
 import com.example.rag.observability.ModelReply;
+import com.example.rag.observability.TokenUsage;
 import com.example.rag.recommendation.FeedbackRepository;
 import com.example.rag.recommendation.RecommendationService;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -321,10 +322,14 @@ public class UserProfileService {
                     null, output, System.currentTimeMillis() - start, "success", null, reply.usage());
             return decision;
         } catch (Exception error) {
-            // 走本地兜底就没有调用模型，用量传 null。这一行的价值在 status='fallback' 与
-            // error_message 上：它们是模型一最需要的难样本标签。
+            // 走本地兜底就没有调用模型，用量传 null——唯一的例外是格式校验失败：那次
+            // 调用真实发生过，模型原始输出与 token 用量随 ProfileDecisionFormatException
+            // 带出来，写进 output_json.rawContent。status、error_message 与这个字段合起来，
+            // 就是模型一最需要的难样本。
+            FallbackSample sample = FallbackSample.from(error);
             callLogger.log(userId, conversationId, "decide", ConversationalProfileAgent.MODEL,
-                    null, null, System.currentTimeMillis() - start, "fallback", error.getMessage(), null);
+                    null, sample.output(), System.currentTimeMillis() - start, "fallback",
+                    error.getMessage(), sample.usage());
             return new ProfileDecisionValidator.Decision(
                     fallback.ready() ? "recommend" : "ask", fallback.ready(), 0,
                     "画像 Agent 调用失败，使用本地兜底规则", fallback.missingFields(), List.of(),
@@ -355,13 +360,32 @@ public class UserProfileService {
                     null, output, System.currentTimeMillis() - start, "success", null, reply.usage());
             return decision;
         } catch (Exception error) {
-            // 与非流式路径同一套兜底；已流出的半段回复会在 final 事件里被权威文本覆盖。
+            // 与非流式路径同一套兜底、同一套难样本留存；已流出的半段回复会在 final
+            // 事件里被权威文本覆盖。
+            FallbackSample sample = FallbackSample.from(error);
             callLogger.log(userId, conversationId, "decide", ConversationalProfileAgent.MODEL,
-                    null, null, System.currentTimeMillis() - start, "fallback", error.getMessage(), null);
+                    null, sample.output(), System.currentTimeMillis() - start, "fallback",
+                    error.getMessage(), sample.usage());
             return new ProfileDecisionValidator.Decision(
                     fallback.ready() ? "recommend" : "ask", fallback.ready(), 0,
                     "画像 Agent 调用失败，使用本地兜底规则", fallback.missingFields(), List.of(),
                     fallback.followUpQuestion() == null ? "" : fallback.followUpQuestion());
+        }
+    }
+
+    /**
+     * fallback 行的难样本：只有格式校验失败时才有原始输出可留——网络失败、超时等情形
+     * 模型根本没有产出内容，返回全 null 保持旧行为（output_json 为空）。原始输出不在这里
+     * 脱敏：ModelCallLogger 写入时会统一 scrub，隐私闸在唯一入口上。
+     */
+    private record FallbackSample(JsonObject output, TokenUsage usage) {
+        static FallbackSample from(Exception error) {
+            if (!(error instanceof ProfileDecisionFormatException formatFailure)) {
+                return new FallbackSample(null, null);
+            }
+            JsonObject output = new JsonObject();
+            output.addProperty("rawContent", formatFailure.rawContent());
+            return new FallbackSample(output, formatFailure.usage());
         }
     }
 

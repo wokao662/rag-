@@ -99,17 +99,25 @@ public final class ConversationalProfileAgent implements AutoCloseable {
             if (!response.isSuccessful()) {
                 throw new IOException("画像 Agent 请求失败 (HTTP " + response.code() + "): " + responseBody);
             }
+            TokenUsage usage;
+            String content;
             try {
                 JsonObject apiResponse = JsonParser.parseString(responseBody).getAsJsonObject();
                 // usage 与 choices 同层，且必须在校验内容之前取出来：校验失败会抛异常，
                 // 而那时 token 已经花掉了，用量却再也拿不回来。
-                TokenUsage usage = TokenUsage.fromApi(apiResponse);
-                String content = apiResponse.getAsJsonArray("choices").get(0).getAsJsonObject()
+                usage = TokenUsage.fromApi(apiResponse);
+                content = apiResponse.getAsJsonArray("choices").get(0).getAsJsonObject()
                         .getAsJsonObject("message").get("content").getAsString();
+            } catch (RuntimeException error) {
+                // 响应外层结构异常（choices 缺失等）时还没有 content 可留，口径与旧版一致。
+                throw new IOException(ProfileDecisionFormatException.MESSAGE, error);
+            }
+            try {
                 return new ModelReply<>(
                         validator.validate(ModelJson.parseObject(content)), usage);
             } catch (RuntimeException error) {
-                throw new IOException("画像 Agent 返回内容未通过格式校验", error);
+                // token 已经花掉了：原始输出与用量随异常带出，落进 fallback 行做微调难样本。
+                throw new ProfileDecisionFormatException(content, usage, error);
             }
         }
     }
@@ -149,7 +157,8 @@ public final class ConversationalProfileAgent implements AutoCloseable {
                 return new ModelReply<>(
                         validator.validate(ModelJson.parseObject(stream.content())), stream.usage());
             } catch (RuntimeException error) {
-                throw new IOException("画像 Agent 返回内容未通过格式校验", error);
+                // 与非流式路径同源：原始输出与用量随异常带出，落进 fallback 行做微调难样本。
+                throw new ProfileDecisionFormatException(stream.content(), stream.usage(), error);
             }
         }
     }
