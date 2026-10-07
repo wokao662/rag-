@@ -127,4 +127,48 @@ class ModelJsonTest {
         assertEquals(1, result.getAsJsonArray("a").size());
         assertEquals(1, result.getAsJsonArray("a").get(0).getAsInt());
     }
+
+    @Test
+    void repairsUnescapedQuotesInsideStringValues() {
+        // 2026-10-07 真实事故形态：推荐模型在 answer 里用半角引号强调短语且未转义
+        // （finish_reason=stop、结构完整闭合、唯独引号非法）。截断抢救治不了中段畸形，
+        // 靠引号修复把内容引号转义后解析；引号在值里保真保留。
+        String content = "{\"status\":\"answer\",\"answer\":\"你这不是不努力，而是拿到题后判断不出\"该用哪条路\"。"
+                + "接下来先练一件事：\"审题\"。\"}";
+        JsonObject result = ModelJson.parseObject(content);
+        assertEquals("answer", result.get("status").getAsString());
+        assertEquals("你这不是不努力，而是拿到题后判断不出\"该用哪条路\"。接下来先练一件事：\"审题\"。",
+                result.get("answer").getAsString());
+    }
+
+    @Test
+    void quoteRepairIsIdentityOnLegalJson() {
+        // 合法 JSON 里字符串的结束引号后必然是结构位，修复器不得改动任何字符（恒等操作）。
+        String legal = "{\"a\":\"普通\",\"b\":1,\"c\":[\"x\",\"y\"],\"d\":{\"e\":\"\"}}";
+        assertEquals(legal, ModelJson.repairUnescapedQuotes(legal));
+    }
+
+    @Test
+    void quoteRepairKeepsProperlyEscapedQuotesIntact() {
+        // 已正确转义的 \" 是合法内容引号：解析保真，修复器对它也恒等，不得二次转义。
+        String content = "{\"say\":\"he said \\\"hi\\\"\",\"n\":1}";
+        assertEquals(content, ModelJson.repairUnescapedQuotes(content));
+        assertEquals("he said \"hi\"", ModelJson.parseObject(content).get("say").getAsString());
+    }
+
+    @Test
+    void repairsUnescapedQuotesCombinedWithTruncation() {
+        // 中段引号与尾部截断并存：先修引号再抢救，已写完整的字段照样救回，残缺字段丢弃。
+        String content = "{\"answer\":\"先做\"审题\"练习，\",\"notes\":\"没写完";
+        JsonObject result = ModelJson.parseObject(content);
+        assertEquals("先做\"审题\"练习，", result.get("answer").getAsString());
+        assertFalse(result.has("notes"));
+    }
+
+    @Test
+    void repairsUnescapedQuotesAfterColonContent() {
+        // 内容里带冒号再接强调引号：判定依据是引号后继字符，而不是内容里有什么。
+        JsonObject result = ModelJson.parseObject("{\"x\":\"他说:\"走\"。\"}");
+        assertEquals("他说:\"走\"。", result.get("x").getAsString());
+    }
 }

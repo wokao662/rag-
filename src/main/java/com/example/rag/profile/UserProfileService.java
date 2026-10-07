@@ -34,6 +34,11 @@ public class UserProfileService {
     private static final int RECOMMENDATION_CONTEXT_MESSAGE_CHARS = 400;
     /** 推荐上下文最多携带几条历史：上一轮推荐 + 这轮追问通常 4 条内，留一倍余量。 */
     private static final int RECOMMENDATION_CONTEXT_MESSAGES = 6;
+    /**
+     * 画像已就绪但推荐生成失败（该推荐却没给成）时的兜底话术：落库进对话历史，
+     * 并随 final 事件传给流式前端，覆盖模型半路失败留在界面上的半截增量。
+     */
+    private static final String RECOMMENDATION_UNAVAILABLE_TEXT = "这次推荐生成没有成功，请重新发送再试一次。";
     private static final Gson GSON = new Gson();
 
     private final DataSource dataSource;
@@ -244,6 +249,15 @@ public class UserProfileService {
                 metadata.add("recommendation", JsonParser.parseString(GSON.toJson(recommendation)));
                 assistantMessageId[0] = messages.save(
                         connection, context.conversationId(), "assistant", recommendation.answer(), metadata);
+            } else {
+                // 画像已就绪但推荐生成失败（上游已吞掉异常）：必须留一条明确的兜底消息。
+                // 否则这一轮在对话记录里整体消失，流式界面还会把半截增量永久留在屏幕上
+                // ——2026-10-07 张威会话连续 4 轮推荐失败、4 条 assistant 消息全部缺失。
+                JsonObject metadata = new JsonObject();
+                metadata.addProperty("messageType", "recommendation_unavailable");
+                assistantMessageId[0] = messages.save(
+                        connection, context.conversationId(), "assistant",
+                        RECOMMENDATION_UNAVAILABLE_TEXT, metadata);
             }
             return null;
         });
@@ -252,9 +266,13 @@ public class UserProfileService {
         // 采集失败不会抛到这里（服务内部已吃掉），对话不会因旁路数据而失败。
         observations.refresh(context.userId());
 
+        // 推荐失败的轮次把兜底话术放进 assistantMessage：流式前端以它为准覆盖已流出的
+        // 半截增量（app.js 权威文本优先取 recommendation，其次 assistantMessage）。
+        String assistantMessage = decision.ready() && recommendation == null
+                ? RECOMMENDATION_UNAVAILABLE_TEXT : decision.nextQuestion();
         return new TurnResult(
                 decision.action(), decision.ready(), prepared.fallback().completeness(), decision.confidence(),
-                decision.reason(), decision.nextQuestion(), decision.missingInformation(),
+                decision.reason(), assistantMessage, decision.missingInformation(),
                 decision.conflicts(), toMap(prepared.merged()), toMap(prepared.validation().acceptedUpdates()),
                 prepared.validation().rejections().size(), recommendation, assistantMessageId[0]);
     }

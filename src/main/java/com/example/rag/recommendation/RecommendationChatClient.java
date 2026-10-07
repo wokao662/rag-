@@ -55,6 +55,7 @@ public final class RecommendationChatClient implements AutoCloseable {
             15. 不输出分析过程，不输出 Markdown，只输出一个合法 JSON 对象。
             16. 你看不到知识库的全貌，只能看到本次检索返回的参考资料；不得对知识库的收录范围下结论（如“知识库只收录了X条策略”“目前只有Y”），不得报出资料条数或系统状态；本次资料匹配不了时，说“这次没有找到完全匹配你需求的内容”，并给出建设性的下一步，不要用“我没办法”结束。
             17. answer 是直接说给学习者听的话，像老师面对面交流：不使用“资料表明”“画像中记载”“资料未提供”这类汇报腔，不念来源编号（出处由 citations 与证据字段承载）。
+            18. answer、reason、caveats 等所有文本字段内不要使用英文半角双引号；需要强调词语时改用中文引号“”或「」，避免生成非法 JSON。
 
             对话追问的处理（explain 模式）：
             - explain 的 answer 是教学正文：结合学习者画像，把该追问的方法展开成可以直接照做的具体步骤（先做什么、再做什么、每次多长时间），并给出至少一个结合其学习内容的具体示范例子。
@@ -87,7 +88,7 @@ public final class RecommendationChatClient implements AutoCloseable {
             }
 
             answer 状态应有 recommendations，followUpQuestions 通常为空；explain 状态可以不带来 recommendations；clarify 状态应有问题；no_match 状态不得编造推荐。
-            输出前逐个删除任何与画像硬条件冲突的推荐，再检查：是否擅改资料数字、每个步骤是否有引用支持、引用的 ref 是否存在于参考资料、有效性主张是否引用了 evidence 条目。只输出检查后的最终 JSON。
+            输出前逐个删除任何与画像硬条件冲突的推荐，再检查：是否擅改资料数字、每个步骤是否有引用支持、引用的 ref 是否存在于参考资料、有效性主张是否引用了 evidence 条目、文本字段里是否混入了英文半角双引号。只输出检查后的最终 JSON。
             """;
 
     private final String apiKey;

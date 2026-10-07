@@ -17,7 +17,8 @@ import java.util.regex.Pattern;
  * 去掉 json_object、只靠 system prompt 约束后，同样的输出降到 1 秒级。
  *
  * <p>代价是失去服务端的 JSON 硬保证：模型偶尔可能把 JSON 包进 Markdown 代码块，
- * 或在前后夹带一句解释。这里统一做兜底——剥掉 ``` 围栏、截取首个 '{' 到末个 '}' 的子串再解析。
+ * 或在前后夹带一句解释。这里统一做兜底——剥掉 ``` 围栏、截取首个 '{' 到末个 '}' 的子串，
+ * 再按 尾随逗号 → 中段未转义引号 → 截断抢救 的顺序修复后解析。
  * 解析不出来时抛 {@link IllegalArgumentException}，交由各客户端既有的 try/catch 转成
  * IOException 走各自的降级路径（抽取记失败、决策回退追问、推荐回退），不会因为一次畸形输出而崩。
  */
@@ -38,7 +39,8 @@ public final class ModelJson {
      *
      * <p>接着按原样解析；失败时尝试“截断抢救”：模型顶到 max_tokens 时输出会在任意位置
      * 断掉（finish_reason=length），已经写完整的字段与推荐仍有业务价值，不该整轮作废。
-     * 抢救只回退到最后一个语法安全点并补全括号，不猜测缺失内容；修不出有效对象时
+     * 抢救只回退到最后一个语法安全点并补全括号，不猜测缺失内容；再失败时做中段引号修复
+     * （见 {@link #repairUnescapedQuotes}）并对修复结果重走同一条解析链；修不出有效对象时
      * 仍然抛 {@link IllegalArgumentException}，由调用方按畸形输出走降级。
      *
      * @param content 模型 {@code choices[0].message.content} 原文，可能带围栏或前后缀文字
@@ -64,25 +66,36 @@ public final class ModelJson {
         // 所以 head 修不出来时要退回全长 full 再试，抢救才能尽量多救。
         String head = end > start ? stripTrailingCommas(candidate.substring(start, end + 1)) : full;
 
-        JsonObject parsed = tryParse(head);
+        JsonObject parsed = parseWholeOrSalvaged(head, full);
+        if (parsed == null) {
+            // 第二层修复：中段未转义引号——模型在文本值里写强调引号（判断"该用哪条路"）时
+            // 引号旁的结构错位，截断抢救修不了；把内容引号转义为 \" 后重走同一条解析链。
+            String repairedHead = repairUnescapedQuotes(head);
+            String repairedFull = head.equals(full) ? repairedHead : repairUnescapedQuotes(full);
+            if (!repairedHead.equals(head) || !repairedFull.equals(full)) {
+                parsed = parseWholeOrSalvaged(repairedHead, repairedFull);
+            }
+        }
         if (parsed != null) {
             return parsed;
         }
-        if (!head.equals(full)) {
-            JsonObject parsedFull = tryParse(full);
-            if (parsedFull != null) {
-                return parsedFull;
-            }
-        }
-        JsonObject salvaged = salvageAndParse(full);
-        if (salvaged == null && !head.equals(full)) {
-            salvaged = salvageAndParse(head);
-        }
-        if (salvaged != null) {
-            return salvaged;
-        }
         String keep = full.length() <= 120 ? full : full.substring(full.length() - 120);
         throw new IllegalArgumentException("模型返回的 JSON 不完整或语法错误（可能被截断），尾部：" + keep);
+    }
+
+    /** 一轮完整解析：原样试 head（剥尾缀）与全长 full；都解析不动再按截断抢救（先 full 后 head，尽量多救字段）。 */
+    private static JsonObject parseWholeOrSalvaged(String head, String full) {
+        JsonObject parsed = tryParse(head);
+        if (parsed == null && !head.equals(full)) {
+            parsed = tryParse(full);
+        }
+        if (parsed == null) {
+            parsed = salvageAndParse(full);
+        }
+        if (parsed == null && !head.equals(full)) {
+            parsed = salvageAndParse(head);
+        }
+        return parsed;
     }
 
     /** 抢救并解析：修不出来或修出空对象（无有效字段）时返回 null。 */
@@ -144,6 +157,57 @@ public final class ModelJson {
                 }
             }
             out.append(c);
+        }
+        return out.toString();
+    }
+
+    /**
+     * 修掉字符串内容里未转义的半角引号（模型用引号强调短语时的最高频中段畸形，如
+     * {@code "answer": "…判断"该用哪条路"。…"}）。
+     *
+     * <p>判定规则：字符串内遇到 {@code "} 时，向后跳过空白看后继字符——是结构位
+     * （逗号、冒号、右花括号、右方括号）或已到末尾，它才是真正的结束引号；否则是写进
+     * 内容里的引号，转义为 {@code \"} 保真保留（解析还原后仍是原文的半角引号）。
+     * 对合法 JSON 是恒等操作：合法字符串的结束引号后面必然是结构位，已正确转义的
+     * 转义对也原样跳过，不会被二次转义。
+     */
+    static String repairUnescapedQuotes(String json) {
+        StringBuilder out = new StringBuilder(json.length() + 16);
+        boolean inString = false;
+        boolean escaped = false;
+        for (int i = 0; i < json.length(); i++) {
+            char c = json.charAt(i);
+            if (!inString) {
+                out.append(c);
+                if (c == '"') {
+                    inString = true;
+                }
+                continue;
+            }
+            if (escaped) {
+                out.append(c);
+                escaped = false;
+            } else if (c == '\\') {
+                out.append(c);
+                escaped = true;
+            } else if (c == '"') {
+                int next = i + 1;
+                while (next < json.length() && Character.isWhitespace(json.charAt(next))) {
+                    next++;
+                }
+                char after = next < json.length() ? json.charAt(next) : '\0';
+                boolean endsString = after == '\0' || after == ',' || after == ':'
+                        || after == '}' || after == ']';
+                if (endsString) {
+                    out.append(c);
+                    inString = false;
+                } else {
+                    // 内容引号：转义保留，解析还原后与模型原意一致。
+                    out.append("\\\"");
+                }
+            } else {
+                out.append(c);
+            }
         }
         return out.toString();
     }
